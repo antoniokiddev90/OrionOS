@@ -29,5 +29,5 @@ uint64_t *paging_walk(uint64_t va, int create);
 int      paging_map_page(uint64_t va, uint64_t pa, uint64_t flags);
 int      paging_unmap_page(uint64_t va);
 int      paging_map_range(uint64_t va, uint64_t pa, uint64_t size, uint64_t flags);
-
+int paging_map_user_page(uint64_t va, uint64_t pa);
 #endif

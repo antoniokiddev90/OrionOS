@@ -1,6 +1,10 @@
 bits 64
 section .text
+
 extern irq_dispatch
+extern sched_should_switch
+extern schedule
+
 %macro IRQ 1
 global irq%1
 irq%1:
@@ -22,6 +26,13 @@ irq%1:
     push r15
     mov rdi, %1
     call irq_dispatch
+    call sched_should_switch
+    test rax, rax
+    jz .no_switch%1
+    mov rdi, rsp
+    call schedule
+    mov rsp, rax
+.no_switch%1:
     pop r15
     pop r14
     pop r13
@@ -39,6 +50,7 @@ irq%1:
     pop rax
     iretq
 %endmacro
+
 %assign n 0
 %rep 16
 IRQ n

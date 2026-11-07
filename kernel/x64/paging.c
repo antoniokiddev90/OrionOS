@@ -97,3 +97,23 @@ int paging_map_range(uint64_t va, uint64_t pa, uint64_t size, uint64_t flags) {
     }
     return 0;
 }
+int paging_map_user_page(uint64_t va, uint64_t pa) {
+    uint64_t *pt = paging_walk(va, 1);
+    if (!pt) return -1;
+
+    uint64_t *pml4 = kernel_pml4;
+    uint64_t pi = pml4_index(va);
+    pml4[pi] |= PTE_USER;
+    uint64_t *pdpt = (uint64_t *)(pml4[pi] & PTE_ADDR_MASK);
+
+    uint64_t dpti = pdpt_index(va);
+    pdpt[dpti] |= PTE_USER;
+    uint64_t *pd = (uint64_t *)(pdpt[dpti] & PTE_ADDR_MASK);
+
+    uint64_t pdi = pd_index(va);
+    pd[pdi] |= PTE_USER;
+
+    pt[pt_index(va)] = (pa & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    paging_invlpg(va);
+    return 0;
+}

@@ -6,6 +6,7 @@
 #include "atkbd.h"
 #include "pmm.h"
 #include "mb2.h"
+#include "syscall.h"
 #include "../mm/vmm.h"
 #include "../mm/heap.h"
 
@@ -15,6 +16,7 @@ void x64_init(void) {
     pic_init();
     pit_init(100);
     atkbd_init();
+    syscall_init();
 }
 
 void x64_mm_init(uint32_t mb_magic, uint32_t mb_info, uint64_t kernel_end) {
