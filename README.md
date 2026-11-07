@@ -1,4 +1,4 @@
-# OrionOS v0.01
+# OrionOS v0.02
 
 OrionOS is a minimal operating system written in C and NASM.
 
@@ -9,6 +9,9 @@ OrionOS is a minimal operating system written in C and NASM.
 - PIC
 - PIT
 - PS/2 Keyboard
+- PMM
+- VMM
+- Heap
 
 ## Architecture
 
@@ -24,6 +27,7 @@ OrionOS is a minimal operating system written in C and NASM.
 - qemu-system-x86_64
 - xorriso
 - grub-mkrescue
+
 ## How to Build
 
 ```bash
