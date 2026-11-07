@@ -27,5 +27,6 @@ iso: kernel.elf
 
 clean:
 	rm -rf $(OBJECTS) kernel.elf orionos.iso build
-
+run: iso
+	qemu-system-x86_64 -cdrom orionos.iso -m 256M -serial stdio
 .PHONY: all iso clean
