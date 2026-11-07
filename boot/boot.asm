@@ -10,12 +10,16 @@ dw 0
 dw 0
 dd 8
 header_end:
-
 section .bss
 align 16
 stack_bottom:
 resb 16384
 stack_top:
+align 8
+mb_magic:
+resb 4
+mb_info:
+resb 4
 align 4096
 pml4:
 resb 4096
@@ -29,6 +33,8 @@ global _start
 extern kernel_main
 _start:
     cli
+    mov [mb_magic], eax
+    mov [mb_info], ebx
     mov esp, stack_top
     mov edi, pml4
     mov eax, pdpt
@@ -75,6 +81,8 @@ long_mode:
     mov rsp, stack_top
     and rsp, -16
     xor rbp, rbp
+    mov edi, [mb_magic]
+    mov esi, [mb_info]
     call kernel_main
 .hang:
     cli
