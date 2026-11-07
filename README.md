@@ -1,4 +1,4 @@
-# OrionOS v0.02
+# OrionOS v0.03
 
 OrionOS is a minimal operating system written in C and NASM.
 
@@ -12,6 +12,8 @@ OrionOS is a minimal operating system written in C and NASM.
 - PMM
 - VMM
 - Heap
+- Scheduler
+- Ring 3
 
 ## Architecture
 
