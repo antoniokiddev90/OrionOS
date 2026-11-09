@@ -23,7 +23,10 @@ void     paging_init(void);
 uint64_t paging_get_cr3(void);
 void     paging_set_cr3(uint64_t cr3);
 void     paging_invlpg(uint64_t va);
-
+uint64_t *paging_new_pml4(void);
+void      paging_free_pml4(uint64_t *pml4);
+uint64_t *paging_current_pml4(void);
+void      paging_switch(uint64_t *pml4);
 uint64_t *paging_pml4(void);
 uint64_t *paging_walk(uint64_t va, int create);
 int      paging_map_page(uint64_t va, uint64_t pa, uint64_t flags);

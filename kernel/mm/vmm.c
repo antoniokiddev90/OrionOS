@@ -39,9 +39,8 @@ uint64_t vmm_alloc_at(uint64_t va, uint64_t size, uint64_t flags) {
     return va;
 }
 
-static uint64_t bump_next = 0xFFFF800000000000ULL;
-static uint64_t bump_end  = 0xFFFF800000000000ULL + (256ULL * 1024 * 1024);
-
+static uint64_t bump_next = 0xFFFFFE0000000000ULL;
+static uint64_t bump_end  = 0xFFFFFE0000000000ULL + (256ULL * 1024 * 1024);
 uint64_t vmm_alloc(uint64_t size, uint64_t flags) {
     uint64_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
     uint64_t bytes = pages * PAGE_SIZE;

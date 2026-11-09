@@ -3,7 +3,7 @@
 #include "mm/heap.h"
 #include "x64/paging.h"
 #include "x64/tss.h"
-
+static struct task *pick_next(struct task *start);
 static struct task *current;
 static struct task *idle_task;
 static uint64_t next_pid = 1;
@@ -15,6 +15,7 @@ void task_init(void) {
     idle_task->kstack_top = 0;
     idle_task->pid = 0;
     idle_task->state = TASK_RUNNING;
+    idle_task->pml4 = paging_current_pml4();
     idle_task->next = idle_task;
     current = idle_task;
 }
@@ -26,7 +27,8 @@ struct task *task_create(uint64_t entry, uint64_t user_stack_top) {
     t->state = TASK_READY;
 
     uint64_t kstack = vmm_alloc(KSTACK_SIZE, PTE_PRESENT | PTE_WRITE);
-    if (!kstack) return 0;
+    t->pml4 = paging_new_pml4();
+    if (!kstack) { paging_free_pml4(t->pml4); kfree(t); return 0; }
     uint64_t top = kstack + KSTACK_SIZE;
     t->kstack_top = top;
 
@@ -43,23 +45,6 @@ struct task *task_create(uint64_t entry, uint64_t user_stack_top) {
     idle_task->next = t;
 
     return t;
-}
-
-struct task *task_current(void) { return current; }
-
-void task_exit(void) {
-    current->state = TASK_DEAD;
-    need_resched = 1;
-    for (;;) __asm__ volatile("hlt");
-}
-
-static struct task *pick_next(struct task *start) {
-    struct task *t = start->next;
-    while (t != start) {
-        if (t->state == TASK_READY) return t;
-        t = t->next;
-    }
-    return 0;
 }
 
 uint64_t schedule(uint64_t current_rsp) {
@@ -79,8 +64,27 @@ uint64_t schedule(uint64_t current_rsp) {
     next->state = TASK_RUNNING;
     current = next;
     tss_set_rsp0(next->kstack_top);
+    paging_switch(next->pml4);
     return next->rsp;
 }
+
+struct task *task_current(void) { return current; }
+
+void task_exit(void) {
+    current->state = TASK_DEAD;
+    need_resched = 1;
+    for (;;) __asm__ volatile("hlt");
+}
+
+static struct task *pick_next(struct task *start) {
+    struct task *t = start->next;
+    while (t != start) {
+        if (t->state == TASK_READY) return t;
+        t = t->next;
+    }
+    return 0;
+}
+
 
 void sched_set_need_resched(void) { need_resched = 1; }
 

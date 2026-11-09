@@ -20,25 +20,27 @@ void user_demo_init(void) {
         return;
     }
 
+    struct task *t = task_create(USER_CODE_VA, USER_STACK_TOP);
+    if (!t) { vga_write("task create failed\n"); return; }
+
+    uint64_t *kernel_pml4 = paging_current_pml4();
+    paging_switch(t->pml4);
+
     uint64_t code_pa = pmm_alloc_frame();
-    if (!code_pa) return;
-    uint8_t *dst = (uint8_t *)code_pa;
-    for (size_t i = 0; i < code_size; ++i) dst[i] = user_demo_start[i];
-    if (paging_map_user_page(USER_CODE_VA, code_pa) != 0) {
-        pmm_free_frame(code_pa);
-        return;
+    if (code_pa) {
+        uint8_t *dst = (uint8_t *)code_pa;
+        for (size_t i = 0; i < code_size; ++i) dst[i] = user_demo_start[i];
+        if (paging_map_user_page(USER_CODE_VA, code_pa) != 0)
+            pmm_free_frame(code_pa);
     }
 
     uint64_t stack_pa = pmm_alloc_frame();
-    if (!stack_pa) return;
-    uint8_t *stk = (uint8_t *)stack_pa;
-    for (size_t i = 0; i < PAGE_SIZE; ++i) stk[i] = 0;
-    if (paging_map_user_page(USER_STACK_VA, stack_pa) != 0) {
-        pmm_free_frame(stack_pa);
-        return;
+    if (stack_pa) {
+        uint8_t *stk = (uint8_t *)stack_pa;
+        for (size_t i = 0; i < PAGE_SIZE; ++i) stk[i] = 0;
+        if (paging_map_user_page(USER_STACK_VA, stack_pa) != 0)
+            pmm_free_frame(stack_pa);
     }
 
-    if (!task_create(USER_CODE_VA, USER_STACK_TOP)) {
-        vga_write("task create failed\n");
-    }
+    paging_switch(kernel_pml4);
 }

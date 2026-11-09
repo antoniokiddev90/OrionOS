@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 static uint64_t *kernel_pml4;
-
+static uint64_t *current_pml4;
 static inline uint64_t read_cr3(void) {
     uint64_t v;
     __asm__ volatile("mov %%cr3, %0" : "=r"(v));
@@ -29,6 +29,11 @@ static uint64_t *alloc_table(void) {
 
 void paging_init(void) {
     kernel_pml4 = (uint64_t *)(read_cr3() & PTE_ADDR_MASK);
+    current_pml4 = kernel_pml4;
+    if (!(kernel_pml4[511] & PTE_PRESENT)) {
+        uint64_t *pdpt = alloc_table();
+        if (pdpt) kernel_pml4[511] = (uint64_t)pdpt | PTE_PRESENT | PTE_WRITE;
+    }
 }
 
 uint64_t paging_get_cr3(void) { return read_cr3(); }
@@ -39,10 +44,10 @@ void paging_invlpg(uint64_t va) {
     __asm__ volatile("invlpg (%0)" : : "r"(va) : "memory");
 }
 
-uint64_t *paging_pml4(void) { return kernel_pml4; }
+uint64_t *paging_pml4(void) { return current_pml4;; }
 
 uint64_t *paging_walk(uint64_t va, int create) {
-    uint64_t *pml4 = kernel_pml4;
+    uint64_t *pml4 = current_pml4;;
     uint64_t *pdpt = (uint64_t *)(pml4[pml4_index(va)] & PTE_ADDR_MASK);
     if (!(pml4[pml4_index(va)] & PTE_PRESENT)) {
         if (!create) return NULL;
@@ -101,7 +106,7 @@ int paging_map_user_page(uint64_t va, uint64_t pa) {
     uint64_t *pt = paging_walk(va, 1);
     if (!pt) return -1;
 
-    uint64_t *pml4 = kernel_pml4;
+    uint64_t *pml4 = current_pml4;
     uint64_t pi = pml4_index(va);
     pml4[pi] |= PTE_USER;
     uint64_t *pdpt = (uint64_t *)(pml4[pi] & PTE_ADDR_MASK);
@@ -116,4 +121,46 @@ int paging_map_user_page(uint64_t va, uint64_t pa) {
     pt[pt_index(va)] = (pa & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITE | PTE_USER;
     paging_invlpg(va);
     return 0;
+}
+#define USER_PML4_START 256
+uint64_t *paging_current_pml4(void) { return current_pml4; }
+
+void paging_switch(uint64_t *pml4) {
+    current_pml4 = pml4;
+    write_cr3((uint64_t)pml4);
+}
+
+#define KERNEL_PML4_SHARED 511
+
+uint64_t *paging_new_pml4(void) {
+    uint64_t pa = pmm_alloc_frame();
+    if (!pa) return NULL;
+    uint64_t *pml4 = (uint64_t *)pa;
+    for (int i = 0; i < 512; ++i) pml4[i] = 0;
+    for (int i = 0; i < 511; ++i) pml4[i] = kernel_pml4[i];
+    pml4[KERNEL_PML4_SHARED] = kernel_pml4[KERNEL_PML4_SHARED];
+    return pml4;
+}
+void paging_free_pml4(uint64_t *pml4) {
+    if (!pml4 || pml4 == kernel_pml4) return;
+    for (int i = USER_PML4_START; i < 512; ++i) {
+        if (!(pml4[i] & PTE_PRESENT)) continue;
+        uint64_t *pdpt = (uint64_t *)(pml4[i] & PTE_ADDR_MASK);
+        for (int j = 0; j < 512; ++j) {
+            if (!(pdpt[j] & PTE_PRESENT)) continue;
+            uint64_t *pd = (uint64_t *)(pdpt[j] & PTE_ADDR_MASK);
+            for (int k = 0; k < 512; ++k) {
+                if (!(pd[k] & PTE_PRESENT)) continue;
+                uint64_t *pt = (uint64_t *)(pd[k] & PTE_ADDR_MASK);
+                for (int l = 0; l < 512; ++l) {
+                    if (pt[l] & PTE_PRESENT)
+                        pmm_free_frame(pt[l] & PTE_ADDR_MASK);
+                }
+                pmm_free_frame((uint64_t)pt);
+            }
+            pmm_free_frame((uint64_t)pd);
+        }
+        pmm_free_frame((uint64_t)pdpt);
+    }
+    pmm_free_frame((uint64_t)pml4);
 }
