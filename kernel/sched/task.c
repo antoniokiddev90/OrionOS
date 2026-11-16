@@ -4,6 +4,8 @@
 #include "x64/paging.h"
 #include "x64/tss.h"
 #include "log/kprintf.h"
+#include "../mm/user_mmap.h"
+
 static struct task *pick_next(struct task *start);
 static struct task *current;
 static struct task *idle_task;
@@ -34,6 +36,7 @@ struct task *task_create(uint64_t entry, uint64_t user_stack, uint64_t arg0, uin
     }
     task->pml4 = pml4;
     task->pid = next_pid++;
+    task->mmap_next = USER_MMAP_BASE;
     task->state = TASK_READY;
     task->cwd[0] = '/';
     task->cwd[1] = 0;
@@ -73,6 +76,7 @@ uint64_t task_fork(uint64_t *user_frame) {
     child->pid = next_pid++;
     child->state = TASK_READY;
     child->parent_pid = current->pid;
+    child->mmap_next = current->mmap_next;
     for (size_t i = 0; i < sizeof(child->cwd); ++i) child->cwd[i] = current->cwd[i];
     child->kstack_top = stack + KSTACK_SIZE;
     uint64_t *child_frame = (uint64_t *)(child->kstack_top - USER_FRAME_SIZE);
@@ -86,6 +90,7 @@ int task_replace_address_space(uint64_t *pml4) {
     if (!current || !pml4 || current == idle_task) return -1;
     uint64_t *old = current->pml4;
     current->pml4 = pml4;
+    current->mmap_next = USER_MMAP_BASE;
     paging_switch(pml4);
     paging_free_pml4(old);
     return 0;

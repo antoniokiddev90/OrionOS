@@ -21,10 +21,13 @@ enum {
     ORION_SYS_EXIT = 17,
     ORION_SYS_YIELD = 18,
     ORION_SYS_DUP = 19,
-    ORION_SYS_ACCESS = 20
+    ORION_SYS_ACCESS = 20,
+    ORION_SYS_MMAP = 21,
+    ORION_SYS_MUNMAP = 22
 };
 long orion_syscall0(uint64_t number);
 long orion_syscall1(uint64_t number, uint64_t first);
 long orion_syscall2(uint64_t number, uint64_t first, uint64_t second);
 long orion_syscall3(uint64_t number, uint64_t first, uint64_t second, uint64_t third);
+long orion_syscall4(uint64_t number, uint64_t first, uint64_t second, uint64_t third, uint64_t fourth);
 #endif

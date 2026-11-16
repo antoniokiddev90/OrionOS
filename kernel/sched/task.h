@@ -18,6 +18,7 @@ struct task {
     uint64_t *pml4;
     char cwd[256];
     struct task *next;
+    uint64_t mmap_next;
 };
 void task_init(void);
 struct task *task_create(uint64_t entry, uint64_t user_stack, uint64_t arg0, uint64_t arg1, uint64_t *pml4);

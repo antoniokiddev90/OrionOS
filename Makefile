@@ -28,7 +28,8 @@ CFILES=kernel/main.c \
        kernel/fs/ext2.c \
        kernel/fs/vfs.c \
        kernel/exec/elf.c \
-       kernel/exec/process.c
+       kernel/exec/process.c \
+       kernel/mm/user_mmap.c
 ASMFILES=boot/boot.asm \
          kernel/x64/kgdt.asm \
          kernel/x64/irq.asm \
@@ -36,7 +37,7 @@ ASMFILES=boot/boot.asm \
 OBJECTS=$(CFILES:.c=.o) $(ASMFILES:.asm=.o)
 USER_PROGRAMS=$(basename $(notdir $(wildcard user/util/*.c)))
 USER_ELFS=$(addprefix build/user/,$(addsuffix .elf,$(USER_PROGRAMS)))
-USER_COMMON=build/user/start.o build/user/libc.o
+USER_COMMON=build/user/start.o build/user/libc.o build/user/mman.o build/user/malloc.o
 DISK_IMAGE=build/disk.img
 all: kernel.elf user
 %.o: %.c
@@ -48,6 +49,10 @@ build/user:
 build/user/libc.o: user/libc/libc.c user/libc/include/stddef.h user/libc/include/stdint.h user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/string.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/sys/stat.h user/libc/include/syscalls.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
 build/user/start.o: user/libc/start.c user/libc/include/stdint.h user/libc/include/stdlib.h | build/user
+>$(CC) $(USER_CFLAGS) -c $< -o $@
+build/user/mman.o: user/libc/mman.c user/libc/include/sys/mman.h user/libc/include/syscalls.h | build/user
+>$(CC) $(USER_CFLAGS) -c $< -o $@
+build/user/malloc.o: user/libc/malloc.c user/libc/include/stdlib.h user/libc/include/sys/mman.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
 build/user/init.o: user/init.c user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/unistd.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@

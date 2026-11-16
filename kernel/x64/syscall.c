@@ -7,6 +7,7 @@
 #include "../fs/vfs.h"
 #include "../x64/paging.h"
 #include "../mm/heap.h"
+#include "../mm/user_mmap.h"
 #include <stdint.h>
 #include <stddef.h>
 #define SYS_WRITE 1
@@ -29,6 +30,8 @@
 #define SYS_YIELD 18
 #define SYS_DUP 19
 #define SYS_ACCESS 20
+#define SYS_MMAP 21
+#define SYS_MUNMAP 22
 #define USER_ARG_MAX 16
 #define USER_STRING_MAX 255
 #define USER_IO_MAX 65536
@@ -287,6 +290,8 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a1, uint64_t a2, uint64_t a3
             (void)a2;
             return (uint64_t)vfs_stat_path(path, &status);
         }
+        case SYS_MMAP: return (uint64_t)user_mmap(a1, a2, a3, a4);
+        case SYS_MUNMAP: return (uint64_t)user_munmap(a1, a2);
         default: (void)a4; (void)a5; return (uint64_t)-1;
     }
 }

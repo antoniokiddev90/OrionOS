@@ -16,6 +16,8 @@
 #define PTE_ADDR_MASK 0x000FFFFFFFFFF000ULL
 #define USER_SPACE_BASE 0x0000000040000000ULL
 #define USER_SPACE_END 0x0000000080000000ULL
+#define USER_MMAP_BASE 0x0000000050000000ULL
+#define USER_MMAP_END 0x0000000070000000ULL
 void paging_init(void);
 uint64_t paging_get_cr3(void);
 void paging_set_cr3(uint64_t cr3);
@@ -32,5 +34,7 @@ int paging_unmap_page(uint64_t va);
 int paging_map_range(uint64_t va, uint64_t pa, uint64_t size, uint64_t flags);
 int paging_map_user_page(uint64_t va, uint64_t pa);
 int paging_map_user_page_in(uint64_t *pml4, uint64_t va, uint64_t pa);
+int paging_map_user_page_access_in(uint64_t *pml4, uint64_t va, uint64_t pa, int writable);
+int paging_unmap_user_page_in(uint64_t *pml4, uint64_t va, uint64_t *physical);
 int paging_clone_user_pages(uint64_t *source, uint64_t *destination);
 #endif

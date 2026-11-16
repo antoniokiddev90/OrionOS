@@ -95,8 +95,6 @@ long strtol(const char *text, char **end, int base) {
     return negative ? -value : value;
 }
 int atoi(const char *text) { return (int)strtol(text, NULL, 10); }
-void *malloc(size_t size) { size = (size + 15) & ~(size_t)15; if (size > LIBC_HEAP_SIZE - libc_heap_used) return NULL; void *result = &libc_heap[libc_heap_used]; libc_heap_used += size; return result; }
-void free(void *pointer) { (void)pointer; }
 int putchar(int value) { char character = (char)value; return write(STDOUT_FILENO, &character, 1) == 1 ? (unsigned char)character : -1; }
 int puts(const char *text) { size_t length = strlen(text); if (write(STDOUT_FILENO, text, length) != (ssize_t)length) return -1; return putchar('\n') < 0 ? -1 : 0; }
 int getchar(void) { char character; return read(STDIN_FILENO, &character, 1) == 1 ? (unsigned char)character : -1; }
