@@ -6,6 +6,10 @@ void uart_init(void) {
     outb(0x3F9, 0x00); outb(0x3FB, 0x80); outb(0x3F8, 0x03); outb(0x3F9, 0x00);
     outb(0x3FB, 0x03); outb(0x3FA, 0xC7); outb(0x3FC, 0x0B);
 }
+void uart_putc(char value) {
+    while ((inb(0x3FD) & 0x20) == 0) { }
+    outb(0x3F8, (uint8_t)value);
+}
 void uart_write(const char *text) {
-    while (*text) { while ((inb(0x3FD) & 0x20) == 0) { } outb(0x3F8, (uint8_t)*text++); }
+    while (*text) uart_putc(*text++);
 }

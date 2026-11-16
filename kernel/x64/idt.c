@@ -2,7 +2,7 @@
 #include "pic.h"
 #include "pit.h"
 #include "atkbd.h"
-#include "vga.h"
+#include "log/kprintf.h"
 
 struct __attribute__((packed)) idt_entry {
     uint16_t low;
@@ -82,38 +82,23 @@ void idt_init(void) {
     __asm__ volatile("lidt %0" : : "m"(descriptor));
 }
 
-static const char hexc[] = "0123456789ABCDEF";
-
-static void print_hex(uint64_t v) {
-    char buf[19];
-    buf[0] = '0';
-    buf[1] = 'x';
-    for (int i = 0; i < 16; ++i) buf[2 + i] = hexc[(v >> (60 - i * 4)) & 0xF];
-    buf[18] = 0;
-    vga_write(buf);
-}
-
 void exception_dispatch(struct exc_frame *f) {
-    vga_write("\nEXCEPTION ");
+    const char *name;
     switch (f->exc_num) {
-        case 0:  vga_write("#DE"); break;
-        case 6:  vga_write("#UD"); break;
-        case 8:  vga_write("#DF"); break;
-        case 13: vga_write("#GP"); break;
-        case 14: vga_write("#PF"); break;
-        default: vga_write("?");   break;
+        case 0:  name = "#DE"; break;
+        case 6:  name = "#UD"; break;
+        case 8:  name = "#DF"; break;
+        case 13: name = "#GP"; break;
+        case 14: name = "#PF"; break;
+        default: name = "?";   break;
     }
-    vga_write(" err=");
-    print_hex(f->error_code);
-    vga_write(" rip=");
-    print_hex(f->rip);
+    kprintf("\nEXCEPTION %s err=%p rip=%p", name, (void *)f->error_code, (void *)f->rip);
     if (f->exc_num == 14) {
         uint64_t cr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
-        vga_write(" cr2=");
-        print_hex(cr2);
+        kprintf(" cr2=%p", (void *)cr2);
     }
-    vga_write("\n");
+    kprintf("\n");
 }
 
 void irq_dispatch(uint64_t irq) {

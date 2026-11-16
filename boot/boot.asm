@@ -20,7 +20,7 @@ mb_magic:
 resb 4
 mb_info:
 resb 4
-align 4096
+alignb 4096
 pml4:
 resb 4096
 pdpt:

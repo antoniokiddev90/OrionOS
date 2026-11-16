@@ -1,4 +1,4 @@
-# OrionOS v0.03
+# OrionOS v0.04
 
 OrionOS is a minimal operating system written in C and NASM.
 
@@ -14,6 +14,11 @@ OrionOS is a minimal operating system written in C and NASM.
 - Heap
 - Scheduler
 - Ring 3
+- EXT2 (read and write)
+- libc
+- coreutils
+- userland shell
+- /init
 
 ## Architecture
 
@@ -29,6 +34,8 @@ OrionOS is a minimal operating system written in C and NASM.
 - qemu-system-x86_64
 - xorriso
 - grub-mkrescue
+- mke2fs
+- debugfs
 
 ## How to Build
 

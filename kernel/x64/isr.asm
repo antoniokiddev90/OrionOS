@@ -74,8 +74,11 @@ syscall_entry:
     mov rcx, [rsp + 88]
     mov r8,  [rsp + 40]
     mov r9,  [rsp + 56]
-
+    mov r10, rsp
+    sub rsp, 16
+    mov [rsp], r10
     call syscall_dispatch
+    add rsp, 16
     mov [rsp + 112], rax
 
     call sched_should_switch
