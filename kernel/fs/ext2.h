@@ -24,4 +24,5 @@ int ext2_mkdir(const char *path);
 int ext2_unlink(const char *path);
 int ext2_readdir(const struct ext2_file *directory, uint64_t *offset, struct ext2_dirent *entry);
 uint32_t ext2_block_size(void);
+void ext2_set_base_lba(uint64_t lba);
 #endif

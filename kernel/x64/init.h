@@ -3,4 +3,5 @@
 #include <stdint.h>
 void x64_init(void);
 void x64_mm_init(uint32_t mb_magic, uint32_t mb_info, uint64_t kernel_end);
+int x64_boot_cmdline(char *out, int capacity);
 #endif

@@ -25,6 +25,7 @@ CFILES=kernel/main.c \
        kernel/mm/heap.c \
        kernel/sched/task.c \
        kernel/block/ata.c \
+       kernel/block/gpt.c \
        kernel/fs/ext2.c \
        kernel/fs/vfs.c \
        kernel/exec/elf.c \

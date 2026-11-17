@@ -1,6 +1,19 @@
 #include "ext2.h"
 #include "../block/ata.h"
 #include <stddef.h>
+static uint64_t base_lba;
+
+void ext2_set_base_lba(uint64_t lba) {
+    base_lba = lba;
+}
+
+static int disk_read(uint64_t lba, uint32_t count, void *buffer) {
+    return ata_pio_read(base_lba + lba, count, buffer);
+}
+
+static int disk_write(uint64_t lba, uint32_t count, const void *buffer) {
+    return ata_pio_write(base_lba + lba, count, buffer);
+}
 #define EXT2_MAGIC 0xEF53
 #define EXT2_ROOT_INODE 2
 #define EXT2_MODE_DIRECTORY 0x4000
@@ -44,7 +57,7 @@ static int read_bytes(uint64_t offset, void *destination, size_t size) {
     while (size) {
         uint64_t lba = offset / 512;
         uint32_t within = (uint32_t)(offset % 512);
-        if (ata_pio_read(lba, 1, sector) != 0) return -1;
+        if (disk_read(lba, 1, sector) != 0) return -1;
         size_t part = 512 - within;
         if (part > size) part = size;
         for (size_t i = 0; i < part; ++i) out[i] = sector[within + i];
@@ -63,10 +76,10 @@ static int write_bytes(uint64_t offset, const void *source, size_t size) {
         size_t part = 512 - within;
         if (part > size) part = size;
         if (within || part != 512) {
-            if (ata_pio_read(lba, 1, sector) != 0) return -1;
+            if (disk_read(lba, 1, sector) != 0) return -1;
         }
         for (size_t i = 0; i < part; ++i) sector[within + i] = in[i];
-        if (ata_pio_write(lba, 1, sector) != 0) return -1;
+        if (disk_write(lba, 1, sector) != 0) return -1;
         in += part;
         offset += part;
         size -= part;
@@ -75,11 +88,11 @@ static int write_bytes(uint64_t offset, const void *source, size_t size) {
 }
 static int read_block(uint32_t block, uint8_t *buffer) {
     if (!mounted || !block || block >= blocks_count) return -1;
-    return ata_pio_read((uint64_t)block * (block_size / 512), block_size / 512, buffer);
+    return disk_read((uint64_t)block * (block_size / 512), block_size / 512, buffer);
 }
 static int write_block(uint32_t block, const uint8_t *buffer) {
     if (!mounted || !block || block >= blocks_count) return -1;
-    return ata_pio_write((uint64_t)block * (block_size / 512), block_size / 512, buffer);
+    return disk_write((uint64_t)block * (block_size / 512), block_size / 512, buffer);
 }
 static int inode_location(uint32_t inode_number, uint64_t *offset, uint32_t *group_out) {
     if (!inode_number || inode_number > inodes_count) return -1;

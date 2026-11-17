@@ -31,3 +31,32 @@ int mb2_find_mmap(uint32_t magic, uint32_t info_ptr,
     }
     return 0;
 }
+
+int mb2_find_cmdline(uint32_t magic, uint32_t info_ptr,
+                     char *out, int capacity) {
+    if (magic != MB2_BOOTLOADER_MAGIC || !out || capacity <= 0) return 0;
+    uint8_t *p = (uint8_t *)(uint64_t)info_ptr;
+    uint32_t total = *(uint32_t *)p;
+    uint8_t *end = p + total;
+    p += 8;
+    while (p < end) {
+        struct mb2_tag *tag = (struct mb2_tag *)p;
+        if (tag->type == MB2_TAG_END) break;
+        if (tag->type == MB2_TAG_CMDLINE) {
+            struct mb2_tag_string *s = (struct mb2_tag_string *)p;
+            size_t length = tag->size > sizeof(struct mb2_tag_string)
+                ? tag->size - sizeof(struct mb2_tag_string)
+                : 0;
+            int i = 0;
+            while (i + 1 < capacity && (size_t)i < length && s->string[i]) {
+                out[i] = s->string[i];
+                ++i;
+            }
+            out[i] = 0;
+            return i;
+        }
+        p += (tag->size + 7) & ~7u;
+    }
+    out[0] = 0;
+    return 0;
+}

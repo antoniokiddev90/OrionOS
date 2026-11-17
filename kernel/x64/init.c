@@ -10,6 +10,9 @@
 #include "../mm/vmm.h"
 #include "../mm/heap.h"
 
+static uint32_t boot_magic;
+static uint32_t boot_info;
+
 void x64_init(void) {
     gdt_init();
     idt_init();
@@ -22,6 +25,9 @@ void x64_init(void) {
 void x64_mm_init(uint32_t mb_magic, uint32_t mb_info, uint64_t kernel_end) {
     struct mb2_mmap_region regions[PMM_MAX_REGIONS];
     struct pmm_region pregions[PMM_MAX_REGIONS];
+
+    boot_magic = mb_magic;
+    boot_info = mb_info;
 
     int n = mb2_find_mmap(mb_magic, mb_info, regions, PMM_MAX_REGIONS);
     if (n <= 0) {
@@ -38,4 +44,8 @@ void x64_mm_init(uint32_t mb_magic, uint32_t mb_info, uint64_t kernel_end) {
     pmm_init(pregions, n, kernel_end);
     vmm_init();
     heap_init();
+}
+
+int x64_boot_cmdline(char *out, int capacity) {
+    return mb2_find_cmdline(boot_magic, boot_info, out, capacity);
 }
