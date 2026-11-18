@@ -63,6 +63,14 @@ pid_t getpid(void) { return (pid_t)orion_syscall0(ORION_SYS_GETPID); }
 void sched_yield(void) { (void)orion_syscall0(ORION_SYS_YIELD); }
 int dup(int descriptor) { return (int)orion_syscall1(ORION_SYS_DUP, (uint64_t)descriptor); }
 int access(const char *path, int mode) { return (int)orion_syscall2(ORION_SYS_ACCESS, (uint64_t)path, (uint64_t)mode); }
+uid_t getuid(void) { return (uid_t)orion_syscall0(ORION_SYS_GETUID); }
+gid_t getgid(void) { return (gid_t)orion_syscall0(ORION_SYS_GETGID); }
+int setuid(uid_t uid) { return (int)orion_syscall1(ORION_SYS_SETUID, (uint64_t)uid); }
+int setgid(gid_t gid) { return (int)orion_syscall1(ORION_SYS_SETGID, (uint64_t)gid); }
+uid_t geteuid(void) { return (uid_t)orion_syscall0(ORION_SYS_GETEUID); }
+gid_t getegid(void) { return (gid_t)orion_syscall0(ORION_SYS_GETEGID); }
+int chown(const char *path, uid_t uid, gid_t gid) { return (int)orion_syscall3(ORION_SYS_CHOWN, (uint64_t)path, (uint64_t)uid, (uint64_t)gid); }
+uint64_t getticks(void) { return (uint64_t)orion_syscall0(ORION_SYS_GETTICKS); }
 int stat(const char *path, struct stat *status) { return (int)orion_syscall2(ORION_SYS_STAT, (uint64_t)path, (uint64_t)status); }
 int fstat(int descriptor, struct stat *status) { return (int)orion_syscall2(ORION_SYS_FSTAT, (uint64_t)descriptor, (uint64_t)status); }
 int mkdir(const char *path, mode_t mode) { (void)mode; return (int)orion_syscall1(ORION_SYS_MKDIR, (uint64_t)path); }

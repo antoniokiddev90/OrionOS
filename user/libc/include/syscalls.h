@@ -23,7 +23,15 @@ enum {
     ORION_SYS_DUP = 19,
     ORION_SYS_ACCESS = 20,
     ORION_SYS_MMAP = 21,
-    ORION_SYS_MUNMAP = 22
+    ORION_SYS_MUNMAP = 22,
+    ORION_SYS_GETUID = 23,
+    ORION_SYS_GETGID = 24,
+    ORION_SYS_SETUID = 25,
+    ORION_SYS_SETGID = 26,
+    ORION_SYS_GETEUID = 27,
+    ORION_SYS_GETEGID = 28,
+    ORION_SYS_CHOWN = 29,
+    ORION_SYS_GETTICKS = 30
 };
 long orion_syscall0(uint64_t number);
 long orion_syscall1(uint64_t number, uint64_t first);

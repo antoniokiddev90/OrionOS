@@ -8,6 +8,7 @@
 #include "../x64/paging.h"
 #include "../mm/heap.h"
 #include "../mm/user_mmap.h"
+#include "../x64/pit.h"
 #include <stdint.h>
 #include <stddef.h>
 #define SYS_WRITE 1
@@ -32,6 +33,14 @@
 #define SYS_ACCESS 20
 #define SYS_MMAP 21
 #define SYS_MUNMAP 22
+#define SYS_GETUID 23
+#define SYS_GETGID 24
+#define SYS_SETUID 25
+#define SYS_SETGID 26
+#define SYS_GETEUID 27
+#define SYS_GETEGID 28
+#define SYS_CHOWN 29
+#define SYS_GETTICKS 30
 #define USER_ARG_MAX 16
 #define USER_STRING_MAX 255
 #define USER_IO_MAX 65536
@@ -132,6 +141,52 @@ static int resolve_path(const char *path, char *output) {
     output[out] = 0;
     return 0;
 }
+static uint64_t sys_getuid(void) {
+    struct task *task = task_current();
+    return task ? task->ruid : (uint64_t)-1;
+}
+
+static uint64_t sys_getgid(void) {
+    struct task *task = task_current();
+    return task ? task->rgid : (uint64_t)-1;
+}
+
+static uint64_t sys_geteuid(void) {
+    struct task *task = task_current();
+    return task ? task->uid : (uint64_t)-1;
+}
+
+static uint64_t sys_getegid(void) {
+    struct task *task = task_current();
+    return task ? task->gid : (uint64_t)-1;
+}
+
+static uint64_t sys_setuid(uint64_t uid) {
+    struct task *task = task_current();
+    if (!task) return (uint64_t)-1;
+    if (task->uid == 0) {
+        task->uid = (uint32_t)uid;
+        task->ruid = (uint32_t)uid;
+        return 0;
+    }
+    if ((uint32_t)uid != task->ruid && (uint32_t)uid != task->uid) return (uint64_t)-1;
+    task->uid = (uint32_t)uid;
+    return 0;
+}
+
+static uint64_t sys_setgid(uint64_t gid) {
+    struct task *task = task_current();
+    if (!task) return (uint64_t)-1;
+    if (task->uid == 0) {
+        task->gid = (uint32_t)gid;
+        task->rgid = (uint32_t)gid;
+        return 0;
+    }
+    if ((uint32_t)gid != task->rgid && (uint32_t)gid != task->gid) return (uint64_t)-1;
+    task->gid = (uint32_t)gid;
+    return 0;
+}
+
 static uint64_t sys_write(int descriptor, uint64_t buffer, size_t length) {
     if (length > USER_IO_MAX || (length && !user_range_readable(buffer, length))) return (uint64_t)-1;
     if (descriptor == 1 || descriptor == 2 || vfs_is_tty(descriptor)) {
@@ -197,6 +252,12 @@ static uint64_t sys_execve(uint64_t path_address, uint64_t argv_address, uint64_
         paging_free_pml4(pml4);
         return (uint64_t)-1;
     }
+    struct vfs_stat status;
+    if (vfs_stat_path(path, &status) == 0) {
+        struct task *task = task_current();
+        if (status.mode & 04000) task->uid = status.uid;
+        if (status.mode & 02000) task->gid = status.gid;
+    }
     for (size_t i = 0; i < 15; ++i) frame[i] = 0;
     frame[9] = argc;
     frame[10] = argv;
@@ -247,7 +308,7 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a1, uint64_t a2, uint64_t a3
         case SYS_CHDIR: {
             char user_path[USER_STRING_MAX + 1];
             char path[256];
-            if (copy_user_string(user_path, a1, sizeof(user_path)) != 0 || resolve_path(user_path, path) != 0 || !vfs_is_directory(path)) return (uint64_t)-1;
+            if (copy_user_string(user_path, a1, sizeof(user_path)) != 0 || resolve_path(user_path, path) != 0 || !vfs_is_directory(path) || !vfs_can_enter(path)) return (uint64_t)-1;
             return (uint64_t)task_set_cwd(path);
         }
         case SYS_GETCWD: {
@@ -290,6 +351,21 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a1, uint64_t a2, uint64_t a3
             (void)a2;
             return (uint64_t)vfs_stat_path(path, &status);
         }
+        case SYS_GETUID: return sys_getuid();
+        case SYS_GETGID: return sys_getgid();
+        case SYS_SETUID: return sys_setuid(a1);
+        case SYS_SETGID: return sys_setgid(a1);
+        case SYS_GETEUID: return sys_geteuid();
+        case SYS_GETEGID: return sys_getegid();
+        case SYS_CHOWN: {
+            char user_path[USER_STRING_MAX + 1];
+            char path[256];
+            struct task *task = task_current();
+            if (!task || task->uid != 0) return (uint64_t)-1;
+            if (copy_user_string(user_path, a1, sizeof(user_path)) != 0 || resolve_path(user_path, path) != 0) return (uint64_t)-1;
+            return (uint64_t)vfs_chown(path, (uint32_t)a2, (uint32_t)a3);
+        }
+        case SYS_GETTICKS: return pit_ticks();
         case SYS_MMAP: return (uint64_t)user_mmap(a1, a2, a3, a4);
         case SYS_MUNMAP: return (uint64_t)user_munmap(a1, a2);
         default: (void)a4; (void)a5; return (uint64_t)-1;

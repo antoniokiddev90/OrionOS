@@ -125,6 +125,68 @@ static int virtual_directory_kind(const char *path) {
 static int is_virtual_path(const char *path) {
     return path_prefix(path, "/dev/") || path_prefix(path, "/proc/") || path_prefix(path, "/tmp/") || virtual_directory_kind(path);
 }
+#define VFS_PERM_EXEC 1
+#define VFS_PERM_WRITE 2
+#define VFS_PERM_READ 4
+
+static uint32_t current_uid(void) {
+    struct task *task = task_current();
+    return task ? task->uid : 0;
+}
+
+static uint32_t current_gid(void) {
+    struct task *task = task_current();
+    return task ? task->gid : 0;
+}
+
+static int mode_allows(uint32_t mode, uint32_t owner_uid, uint32_t owner_gid, uint32_t want) {
+    uint32_t uid = current_uid();
+    if (uid == 0) return 1;
+    uint32_t bits;
+    if (uid == owner_uid) bits = (mode >> 6) & 7;
+    else if (current_gid() == owner_gid) bits = (mode >> 3) & 7;
+    else bits = mode & 7;
+    return (bits & want) == want;
+}
+
+static int open_allows(const struct ext2_file *file, int flags) {
+    uint32_t want = 0;
+    int access = flags & 3;
+    if (access != VFS_O_WRONLY) want |= VFS_PERM_READ;
+    if (access != VFS_O_RDONLY) want |= VFS_PERM_WRITE;
+    return mode_allows(file->mode, file->uid, file->gid, want);
+}
+
+static int parent_allows(const char *path, uint32_t want) {
+    if (current_uid() == 0) return 1;
+    size_t length = string_length(path);
+    while (length > 1 && path[length - 1] == '/') --length;
+    size_t split = length;
+    while (split && path[split - 1] != '/') --split;
+    if (!split) return 0;
+    char parent[256];
+    size_t parent_length = split > 1 ? split - 1 : 1;
+    if (parent_length + 1 > sizeof(parent)) return 0;
+    for (size_t i = 0; i < parent_length; ++i) parent[i] = path[i];
+    parent[parent_length] = 0;
+    struct ext2_file directory;
+    if (ext2_lookup(parent, &directory) != 0) return 0;
+    return mode_allows(directory.mode, directory.uid, directory.gid, want);
+}
+
+int vfs_chown(const char *path, uint32_t uid, uint32_t gid) {
+    if (!path || is_virtual_path(path)) return -1;
+    return ext2_chown(path, uid, gid);
+}
+
+int vfs_can_enter(const char *path) {
+    if (!path) return 0;
+    if (is_virtual_path(path)) return 1;
+    struct ext2_file directory;
+    if (ext2_lookup(path, &directory) != 0) return 0;
+    return mode_allows(directory.mode, directory.uid, directory.gid, VFS_PERM_EXEC);
+}
+
 int vfs_init(void) {
     for (size_t i = 0; i < VFS_MAX_OPEN; ++i) descriptors[i].used = 0;
     for (size_t i = 0; i < VFS_MAX_TMP; ++i) tmp_files[i].used = 0;
@@ -178,12 +240,18 @@ int vfs_open_flags(const char *path, int flags, uint32_t mode) {
         item->used = 0;
         return -1;
     } else {
+        int created = 0;
         if (ext2_lookup(path, &item->file) != 0) {
-            if (!(flags & VFS_O_CREAT) || ext2_create(path, mode, &item->file) != 0) {
+            if (!(flags & VFS_O_CREAT) || !parent_allows(path, VFS_PERM_WRITE | VFS_PERM_EXEC) || ext2_create(path, mode, current_uid(), current_gid(), &item->file) != 0) {
                 item->used = 0;
                 return -1;
             }
+            created = 1;
         } else if ((flags & VFS_O_CREAT) && (flags & VFS_O_EXCL)) {
+            item->used = 0;
+            return -1;
+        }
+        if (!created && !open_allows(&item->file, flags)) {
             item->used = 0;
             return -1;
         }
@@ -377,11 +445,15 @@ static int fill_stat(const struct ext2_file *file, struct vfs_stat *status) {
     if (!file || !status) return -1;
     status->inode = file->inode;
     status->size = file->size;
-    status->mode = (file->mode & EXT2_MODE_DIRECTORY) == EXT2_MODE_DIRECTORY ? VFS_S_IFDIR | 0755 : VFS_S_IFREG | 0644;
+    status->mode = file->mode;
+    status->uid = file->uid;
+    status->gid = file->gid;
     return 0;
 }
 int vfs_stat_path(const char *path, struct vfs_stat *status) {
     if (!path || !status) return -1;
+    status->uid = 0;
+    status->gid = 0;
     int dir = virtual_directory_kind(path);
     if (dir) {
         status->inode = 1;
@@ -409,6 +481,8 @@ int vfs_stat_path(const char *path, struct vfs_stat *status) {
 int vfs_stat_fd(int descriptor, struct vfs_stat *status) {
     if (descriptor < 0 || descriptor >= VFS_MAX_OPEN || !descriptors[descriptor].used || !status) return -1;
     struct vfs_descriptor *item = &descriptors[descriptor];
+    status->uid = 0;
+    status->gid = 0;
     if (item->kind == VFS_KIND_EXT2 || item->kind == VFS_KIND_DIRECTORY) return fill_stat(&item->file, status);
     if (item->kind == VFS_KIND_TMP) {
         status->inode = 0x10000 + (uint64_t)item->tmp_index;
@@ -423,7 +497,8 @@ int vfs_stat_fd(int descriptor, struct vfs_stat *status) {
 }
 int vfs_mkdir(const char *path) {
     if (!path || is_virtual_path(path)) return -1;
-    return ext2_mkdir(path);
+    if (!parent_allows(path, VFS_PERM_WRITE | VFS_PERM_EXEC)) return -1;
+    return ext2_mkdir(path, current_uid(), current_gid());
 }
 int vfs_unlink(const char *path) {
     if (!path) return -1;
@@ -433,6 +508,7 @@ int vfs_unlink(const char *path) {
         return 0;
     }
     if (is_virtual_path(path)) return -1;
+    if (!parent_allows(path, VFS_PERM_WRITE | VFS_PERM_EXEC)) return -1;
     return ext2_unlink(path);
 }
 int vfs_is_directory(const char *path) {

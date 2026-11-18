@@ -19,7 +19,7 @@ OrionOS is a minimal operating system written in C and NASM.
 - coreutils
 - userland shell
 - /init
-
+- multi-user
 ## Architecture
 
 - Target: x86 (64-bit long mode)

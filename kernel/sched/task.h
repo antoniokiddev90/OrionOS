@@ -19,6 +19,10 @@ struct task {
     char cwd[256];
     struct task *next;
     uint64_t mmap_next;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t ruid;
+    uint32_t rgid;
 };
 void task_init(void);
 struct task *task_create(uint64_t entry, uint64_t user_stack, uint64_t arg0, uint64_t arg1, uint64_t *pml4);

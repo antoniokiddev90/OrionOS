@@ -16,6 +16,8 @@ struct vfs_stat {
     uint64_t inode;
     uint64_t size;
     uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
 };
 int vfs_init(void);
 int vfs_open(const char *path);
@@ -33,4 +35,6 @@ int vfs_mkdir(const char *path);
 int vfs_unlink(const char *path);
 int vfs_is_directory(const char *path);
 int vfs_is_tty(int descriptor);
+int vfs_can_enter(const char *path);
+int vfs_chown(const char *path, uint32_t uid, uint32_t gid);
 #endif

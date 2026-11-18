@@ -76,6 +76,10 @@ uint64_t task_fork(uint64_t *user_frame) {
     child->pid = next_pid++;
     child->state = TASK_READY;
     child->parent_pid = current->pid;
+    child->uid = current->uid;
+    child->gid = current->gid;
+    child->ruid = current->ruid;
+    child->rgid = current->rgid;
     child->mmap_next = current->mmap_next;
     for (size_t i = 0; i < sizeof(child->cwd); ++i) child->cwd[i] = current->cwd[i];
     child->kstack_top = stack + KSTACK_SIZE;

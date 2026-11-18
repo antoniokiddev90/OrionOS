@@ -5,6 +5,8 @@
 typedef long ssize_t;
 typedef long off_t;
 typedef int pid_t;
+typedef uint32_t uid_t;
+typedef uint32_t gid_t;
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
@@ -26,4 +28,12 @@ pid_t getpid(void);
 void sched_yield(void);
 int dup(int descriptor);
 int access(const char *path, int mode);
+uid_t getuid(void);
+gid_t getgid(void);
+int setuid(uid_t uid);
+int setgid(gid_t gid);
+uid_t geteuid(void);
+gid_t getegid(void);
+int chown(const char *path, uid_t uid, gid_t gid);
+uint64_t getticks(void);
 #endif

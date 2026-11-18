@@ -114,6 +114,8 @@ static int read_inode(uint32_t inode_number, struct ext2_file *file) {
     if (inode_size > sizeof(raw) || read_bytes(inode_offset, raw, inode_size) != 0) return -1;
     file->inode = inode_number;
     file->mode = read_u16(raw, 0);
+    file->uid = read_u16(raw, 2);
+    file->gid = read_u16(raw, 24);
     file->size = read_u32(raw, 4);
     if ((file->mode & EXT2_MODE_REGULAR) && inode_size >= 112) file->size |= (uint64_t)read_u32(raw, 108) << 32;
     for (size_t i = 0; i < 15; ++i) file->blocks[i] = read_u32(raw, 40 + i * 4);
@@ -126,6 +128,8 @@ static int write_inode(const struct ext2_file *file, uint16_t links, uint32_t si
     if (inode_size > sizeof(raw) || read_bytes(inode_offset, raw, inode_size) != 0) return -1;
     put_u16(raw, 0, (uint16_t)file->mode);
     put_u32(raw, 4, (uint32_t)file->size);
+    put_u16(raw, 2, (uint16_t)file->uid);
+    put_u16(raw, 24, (uint16_t)file->gid);
     put_u16(raw, 26, links);
     uint32_t allocated = 0;
     for (size_t i = 0; i < 12; ++i) if (file->blocks[i]) ++allocated;
@@ -441,7 +445,7 @@ static int split_parent(const char *path, char *parent, char *name) {
     if (name_length == 2 && name[0] == '.' && name[1] == '.') return -1;
     return 0;
 }
-static int create_node(const char *path, uint32_t mode, struct ext2_file *out) {
+static int create_node(const char *path, uint32_t mode, uint32_t uid, uint32_t gid, struct ext2_file *out) {
     char parent_path[256];
     char name[256];
     struct ext2_file parent;
@@ -455,6 +459,8 @@ static int create_node(const char *path, uint32_t mode, struct ext2_file *out) {
     struct ext2_file node;
     node.inode = inode_number;
     node.mode = mode;
+    node.uid = uid;
+    node.gid = gid;
     node.size = 0;
     for (size_t i = 0; i < 15; ++i) node.blocks[i] = 0;
     if ((mode & EXT2_MODE_DIRECTORY) == EXT2_MODE_DIRECTORY) {
@@ -489,15 +495,15 @@ static int create_node(const char *path, uint32_t mode, struct ext2_file *out) {
     if (out) *out = node;
     return 0;
 }
-int ext2_create(const char *path, uint32_t mode, struct ext2_file *file) {
+int ext2_create(const char *path, uint32_t mode, uint32_t uid, uint32_t gid, struct ext2_file *file) {
     if (!mounted) return -1;
     if ((mode & EXT2_MODE_DIRECTORY) == EXT2_MODE_DIRECTORY) return -1;
-    if (create_node(path, EXT2_MODE_REGULAR | (mode & 0777), file) != 0) return -1;
+    if (create_node(path, EXT2_MODE_REGULAR | (mode & 0777), uid, gid, file) != 0) return -1;
     return 0;
 }
-int ext2_mkdir(const char *path) {
+int ext2_mkdir(const char *path, uint32_t uid, uint32_t gid) {
     if (!mounted) return -1;
-    return create_node(path, EXT2_MODE_DIRECTORY | 0755, NULL);
+    return create_node(path, EXT2_MODE_DIRECTORY | 0755, uid, gid, NULL);
 }
 int ext2_unlink(const char *path) {
     char parent_path[256];
@@ -548,6 +554,17 @@ int ext2_unlink(const char *path) {
     }
     return -1;
 }
+int ext2_chown(const char *path, uint32_t uid, uint32_t gid) {
+    struct ext2_file file;
+    uint64_t offset;
+    uint8_t raw[256];
+    if (!mounted || ext2_lookup(path, &file) != 0 || inode_location(file.inode, &offset, NULL) != 0) return -1;
+    if (inode_size > sizeof(raw) || read_bytes(offset, raw, inode_size) != 0) return -1;
+    put_u16(raw, 2, (uint16_t)uid);
+    put_u16(raw, 24, (uint16_t)gid);
+    return write_bytes(offset, raw, inode_size);
+}
+
 int ext2_readdir(const struct ext2_file *directory, uint64_t *offset, struct ext2_dirent *entry) {
     if (!mounted || !directory || !offset || !entry || (directory->mode & EXT2_MODE_DIRECTORY) != EXT2_MODE_DIRECTORY) return -1;
     while (*offset < directory->size) {

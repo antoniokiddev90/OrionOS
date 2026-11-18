@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 int main(void) {
-    char *arguments[] = {"/bin/sh", NULL};
+    char *arguments[] = {"/bin/login", NULL};
     for (;;) {
         pid_t child = fork();
         if (child < 0) {
@@ -11,8 +11,8 @@ int main(void) {
             continue;
         }
         if (child == 0) {
-            execve("/bin/sh", arguments, NULL);
-            puts("init: cannot execute /bin/sh");
+            execve("/bin/login", arguments, NULL);
+            puts("init: cannot execute /bin/login");
             exit(127);
         }
         int status = 0;
