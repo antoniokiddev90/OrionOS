@@ -8,6 +8,7 @@ typedef struct {
     volatile uint8_t shift_down;
     volatile uint8_t control_down;
     volatile uint8_t extended;
+    volatile uint8_t e1_remaining;
 } TecladoBuffer;
 static uint8_t memoria_buffer[128];
 static TecladoBuffer teclado;
@@ -24,20 +25,24 @@ void atkbd_init(void) {
     teclado.shift_down = 0;
     teclado.control_down = 0;
     teclado.extended = 0;
+    teclado.e1_remaining = 0;
 
     while (inb(0x64) & 1) (void)inb(0x60);
     outb(0x64, 0xAE);
 }
 void atkbd_irq(void) {
     uint8_t scan = inb(0x60);
+    if (scan == 0xE1) { teclado.e1_remaining = 2; return; }
+    if (teclado.e1_remaining) { teclado.e1_remaining = (uint8_t)(teclado.e1_remaining - 1); return; }
     if (scan == 0xE0) { teclado.extended = 1; return; }
+    if (!teclado.tamanho) return;
     uint8_t released = scan & 0x80;
     uint8_t code = scan & 0x7F;
     uint8_t extended = teclado.extended;
     teclado.extended = 0;
-    if (code == 0x2A || code == 0x36) { teclado.shift_down = !released; return; }
     if (code == 0x1D) { teclado.control_down = !released; return; }
     if (extended) return;
+    if (code == 0x2A || code == 0x36) { teclado.shift_down = !released; return; }
     if (released) return;
     uint8_t ch = teclado.shift_down && shifted[code] ? (uint8_t)shifted[code] : (uint8_t)keys[code];
     if (teclado.control_down) {
@@ -49,6 +54,7 @@ void atkbd_irq(void) {
     if (next != teclado.tail) { teclado.buffer[teclado.head] = ch; teclado.head = next; }
 }
 uint8_t atkbd_read_char(void) {
+    if (!teclado.tamanho) return 0;
     if (teclado.tail == teclado.head) return 0;
     uint8_t ch = teclado.buffer[teclado.tail];
     teclado.buffer[teclado.tail] = 0;
