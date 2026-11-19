@@ -2,7 +2,18 @@
 #include "pic.h"
 #include "pit.h"
 #include "atkbd.h"
+#include "tss.h"
 #include "log/kprintf.h"
+
+#define IDT_ENTRIES        256
+#define IRQ_VECTOR_BASE    32
+#define IRQ_VECTOR_COUNT   16
+#define EXCEPTION_COUNT    32
+#define IDT_INTERRUPT_GATE 0x8E
+#define KERNEL_CS          0x08
+#define DF_VECTOR          8
+#define DF_IST             1
+#define PF_VECTOR          14
 
 struct __attribute__((packed)) idt_entry {
     uint16_t low;
@@ -19,7 +30,8 @@ struct __attribute__((packed)) idtr {
     uint64_t base;
 };
 
-static struct idt_entry idt[256];
+static struct idt_entry idt[IDT_ENTRIES];
+static uint8_t df_ist_stack[4096] __attribute__((aligned(16)));
 
 extern void irq0(void);
 extern void irq1(void);
@@ -39,10 +51,37 @@ extern void irq14(void);
 extern void irq15(void);
 
 extern void exc0(void);
+extern void exc1(void);
+extern void exc2(void);
+extern void exc3(void);
+extern void exc4(void);
+extern void exc5(void);
 extern void exc6(void);
+extern void exc7(void);
 extern void exc8(void);
+extern void exc9(void);
+extern void exc10(void);
+extern void exc11(void);
+extern void exc12(void);
 extern void exc13(void);
 extern void exc14(void);
+extern void exc15(void);
+extern void exc16(void);
+extern void exc17(void);
+extern void exc18(void);
+extern void exc19(void);
+extern void exc20(void);
+extern void exc21(void);
+extern void exc22(void);
+extern void exc23(void);
+extern void exc24(void);
+extern void exc25(void);
+extern void exc26(void);
+extern void exc27(void);
+extern void exc28(void);
+extern void exc29(void);
+extern void exc30(void);
+extern void exc31(void);
 
 struct exc_frame {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -51,49 +90,65 @@ struct exc_frame {
     uint64_t rip, cs, rflags;
 };
 
-void idt_set_gate_dpl(uint8_t v, void (*handler)(void), uint8_t dpl) {
+static void idt_set_gate_full(uint8_t v, void (*handler)(void), uint8_t dpl, uint8_t ist) {
     uint64_t address = (uint64_t)handler;
-    uint8_t flags = (uint8_t)(0x8E | ((dpl & 3) << 5));
+    uint8_t flags = (uint8_t)(IDT_INTERRUPT_GATE | ((dpl & 3) << 5));
     idt[v] = (struct idt_entry){
-        (uint16_t)address, 0x08, 0, flags,
+        (uint16_t)address, KERNEL_CS, ist, flags,
         (uint16_t)(address >> 16), (uint32_t)(address >> 32), 0
     };
 }
 
 void idt_set_gate(uint8_t v, void (*handler)(void)) {
-    idt_set_gate_dpl(v, handler, 0);
+    idt_set_gate_full(v, handler, 0, 0);
+}
+
+void idt_set_gate_dpl(uint8_t v, void (*handler)(void), uint8_t dpl) {
+    idt_set_gate_full(v, handler, dpl, 0);
+}
+
+void idt_set_gate_ist(uint8_t v, void (*handler)(void), uint8_t ist) {
+    idt_set_gate_full(v, handler, 0, ist);
 }
 
 void idt_init(void) {
-    struct idtr descriptor;
-    void (*const handlers[16])(void) = {
+    void (*const irq_handlers[IRQ_VECTOR_COUNT])(void) = {
         irq0, irq1, irq2, irq3, irq4, irq5, irq6, irq7,
         irq8, irq9, irq10, irq11, irq12, irq13, irq14, irq15
     };
-    for (unsigned i = 0; i < 256; ++i) idt[i] = (struct idt_entry){0};
-    for (unsigned i = 0; i < 16; ++i) idt_set_gate((uint8_t)(32 + i), handlers[i]);
-    idt_set_gate(0, exc0);
-    idt_set_gate(6, exc6);
-    idt_set_gate(8, exc8);
-    idt_set_gate(13, exc13);
-    idt_set_gate(14, exc14);
+    void (*const exc_handlers[EXCEPTION_COUNT])(void) = {
+        exc0,  exc1,  exc2,  exc3,  exc4,  exc5,  exc6,  exc7,
+        exc8,  exc9,  exc10, exc11, exc12, exc13, exc14, exc15,
+        exc16, exc17, exc18, exc19, exc20, exc21, exc22, exc23,
+        exc24, exc25, exc26, exc27, exc28, exc29, exc30, exc31
+    };
+    struct idtr descriptor;
+
+    for (unsigned i = 0; i < IDT_ENTRIES; ++i) idt[i] = (struct idt_entry){0};
+    for (unsigned i = 0; i < IRQ_VECTOR_COUNT; ++i)
+        idt_set_gate((uint8_t)(IRQ_VECTOR_BASE + i), irq_handlers[i]);
+    for (unsigned i = 0; i < EXCEPTION_COUNT; ++i)
+        idt_set_gate((uint8_t)i, exc_handlers[i]);
+
+    tss_set_ist(DF_IST, (uint64_t)(df_ist_stack + sizeof(df_ist_stack)));
+    idt_set_gate_ist(DF_VECTOR, exc8, DF_IST);
+
     descriptor.limit = sizeof(idt) - 1;
     descriptor.base  = (uint64_t)idt;
     __asm__ volatile("lidt %0" : : "m"(descriptor));
 }
 
 void exception_dispatch(struct exc_frame *f) {
-    const char *name;
-    switch (f->exc_num) {
-        case 0:  name = "#DE"; break;
-        case 6:  name = "#UD"; break;
-        case 8:  name = "#DF"; break;
-        case 13: name = "#GP"; break;
-        case 14: name = "#PF"; break;
-        default: name = "?";   break;
-    }
+    static const char *const names[EXCEPTION_COUNT] = {
+        "#DE",  "#DB",  "NMI",  "#BP",  "#OF",  "#BR",  "#UD",  "#NM",
+        "#DF",  "?",    "#TS",  "#NP",  "#SS",  "#GP",  "#PF",  "?",
+        "#MF",  "#AC",  "#MC",  "#XM",  "#VE",  "#CP",  "?",    "?",
+        "?",    "?",    "?",    "?",    "#HV",  "#VC",  "#SX",  "?"
+    };
+    const char *name = f->exc_num < EXCEPTION_COUNT ? names[f->exc_num] : "?";
+
     kprintf("\nEXCEPTION %s err=%p rip=%p", name, (void *)f->error_code, (void *)f->rip);
-    if (f->exc_num == 14) {
+    if (f->exc_num == PF_VECTOR) {
         uint64_t cr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
         kprintf(" cr2=%p", (void *)cr2);

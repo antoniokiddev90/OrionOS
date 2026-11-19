@@ -44,11 +44,15 @@ exc_common:
     hlt
     jmp .hang
 
-EXC_NOERR 0
-EXC_NOERR 6
-EXC_ERR   8
-EXC_ERR   13
-EXC_ERR   14
+%assign n 0
+%rep 32
+%if n == 8 || n == 13 || n == 14
+EXC_ERR n
+%else
+EXC_NOERR n
+%endif
+%assign n n + 1
+%endrep
 
 global syscall_entry
 syscall_entry:
