@@ -2,7 +2,16 @@
 #include "pic.h"
 #include "pit.h"
 #include "atkbd.h"
+#include "tss.h"
 #include "log/kprintf.h"
+
+#define IDT_ENTRIES        256
+#define IRQ_VECTOR_BASE    32
+#define IRQ_VECTOR_COUNT   16
+#define EXCEPTION_COUNT    32
+#define IDT_INTERRUPT_GATE 0x8E
+#define KERNEL_CS          0x08
+#define DF_IST             1
 
 struct __attribute__((packed)) idt_entry {
     uint16_t low;
@@ -19,7 +28,8 @@ struct __attribute__((packed)) idtr {
     uint64_t base;
 };
 
-static struct idt_entry idt[256];
+static struct idt_entry idt[IDT_ENTRIES];
+static uint8_t df_ist_stack[4096] __attribute__((aligned(16)));
 
 extern void irq0(void);
 extern void irq1(void);
@@ -39,10 +49,37 @@ extern void irq14(void);
 extern void irq15(void);
 
 extern void exc0(void);
+extern void exc1(void);
+extern void exc2(void);
+extern void exc3(void);
+extern void exc4(void);
+extern void exc5(void);
 extern void exc6(void);
+extern void exc7(void);
 extern void exc8(void);
+extern void exc9(void);
+extern void exc10(void);
+extern void exc11(void);
+extern void exc12(void);
 extern void exc13(void);
 extern void exc14(void);
+extern void exc15(void);
+extern void exc16(void);
+extern void exc17(void);
+extern void exc18(void);
+extern void exc19(void);
+extern void exc20(void);
+extern void exc21(void);
+extern void exc22(void);
+extern void exc23(void);
+extern void exc24(void);
+extern void exc25(void);
+extern void exc26(void);
+extern void exc27(void);
+extern void exc28(void);
+extern void exc29(void);
+extern void exc30(void);
+extern void exc31(void);
 
 struct exc_frame {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -51,58 +88,52 @@ struct exc_frame {
     uint64_t rip, cs, rflags;
 };
 
-void idt_set_gate_dpl(uint8_t v, void (*handler)(void), uint8_t dpl) {
+static void idt_set_gate_full(uint8_t v, void (*handler)(void), uint8_t dpl, uint8_t ist) {
     uint64_t address = (uint64_t)handler;
-    uint8_t flags = (uint8_t)(0x8E | ((dpl & 3) << 5));
+    uint8_t flags = (uint8_t)(IDT_INTERRUPT_GATE | ((dpl & 3) << 5));
     idt[v] = (struct idt_entry){
-        (uint16_t)address, 0x08, 0, flags,
+        (uint16_t)address, KERNEL_CS, ist, flags,
         (uint16_t)(address >> 16), (uint32_t)(address >> 32), 0
     };
 }
 
 void idt_set_gate(uint8_t v, void (*handler)(void)) {
-    idt_set_gate_dpl(v, handler, 0);
+    idt_set_gate_full(v, handler, 0, 0);
 }
 
-void idt_init(void) {
-    struct idtr descriptor;
-    void (*const handlers[16])(void) = {
-        irq0, irq1, irq2, irq3, irq4, irq5, irq6, irq7,
-        irq8, irq9, irq10, irq11, irq12, irq13, irq14, irq15
-    };
-    for (unsigned i = 0; i < 256; ++i) idt[i] = (struct idt_entry){0};
-    for (unsigned i = 0; i < 16; ++i) idt_set_gate((uint8_t)(32 + i), handlers[i]);
-    idt_set_gate(0, exc0);
-    idt_set_gate(6, exc6);
-    idt_set_gate(8, exc8);
-    idt_set_gate(13, exc13);
-    idt_set_gate(14, exc14);
-    descriptor.limit = sizeof(idt) - 1;
-    descriptor.base  = (uint64_t)idt;
-    __asm__ volatile("lidt %0" : : "m"(descriptor));
+void idt_set_gate_dpl(uint8_t v, void (*handler)(void), uint8_t dpl) {
+    idt_set_gate_full(v, handler, dpl, 0);
 }
 
-void exception_dispatch(struct exc_frame *f) {
-    const char *name;
-    switch (f->exc_num) {
-        case 0:  name = "#DE"; break;
-        case 6:  name = "#UD"; break;
-        case 8:  name = "#DF"; break;
-        case 13: name = "#GP"; break;
-        case 14: name = "#PF"; break;
-        default: name = "?";   break;
-    }
-    kprintf("\nEXCEPTION %s err=%p rip=%p", name, (void *)f->error_code, (void *)f->rip);
-    if (f->exc_num == 14) {
-        uint64_t cr2;
-        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
-        kprintf(" cr2=%p", (void *)cr2);
-    }
-    kprintf("\n");
+void idt_set_gate_ist(uint8_t v, void (*handler)(void), uint8_t ist) {
+    idt_set_gate_full(v, handler, 0, ist);
 }
+void atkbd_init(void) {
+    teclado.buffer = memoria_buffer;
+    teclado.tamanho = 128;
+    teclado.head = 0;
+    teclado.tail = 0;
+    teclado.shift_down = 0;
+    teclado.control_down = 0;
 
-void irq_dispatch(uint64_t irq) {
-    if (irq == 0) pit_irq();
-    if (irq == 1) atkbd_irq();
-    pic_eoi((uint8_t)irq);
+    uint8_t status = inb(0x64); if (status & 1) (void)inb(0x60); outb(0x64, 0xAE);
 }
+void atkbd_irq(void) {
+    uint8_t scan = inb(0x60);
+    uint8_t released = scan & 0x80;
+    uint8_t code = scan & 0x7F;
+    if (code == 0x2A || code == 0x36) { teclado.shift_down = !released; return; }
+    if (code == 0x1D) { teclado.control_down = !released; return; }
+    if (released) return;
+    uint8_t ch = teclado.shift_down && shifted[code] ? (uint8_t)shifted[code] : (uint8_t)keys[code];
+    if (teclado.control_down && ch >= 'a' && ch <= 'z') ch = (uint8_t)(ch - 'a' + 1);
+    if (!ch) return;
+    uint8_t next = (uint8_t)((teclado.head + 1) % teclado.tamanho);
+    if (next != teclado.tail) { teclado.buffer[teclado.head] = ch; teclado.head = next; }
+}
+uint8_t atkbd_read_char(void) {
+    if (teclado.tail == teclado.head) return 0;
+    uint8_t ch = teclado.buffer[teclado.tail]; teclado.tail = (uint8_t)((teclado.tail + 1) % teclado.tamanho);
+    return ch;
+}
+ 
