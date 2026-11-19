@@ -1,5 +1,4 @@
 #include "atkbd.h"
-#include "vga.h"
 #include <stddef.h>
 typedef struct {
     uint8_t *buffer;
@@ -8,6 +7,7 @@ typedef struct {
     volatile uint8_t tail;
     volatile uint8_t shift_down;
     volatile uint8_t control_down;
+    volatile uint8_t extended;
 } TecladoBuffer;
 static uint8_t memoria_buffer[128];
 static TecladoBuffer teclado;
@@ -23,18 +23,27 @@ void atkbd_init(void) {
     teclado.tail = 0;
     teclado.shift_down = 0;
     teclado.control_down = 0;
+    teclado.extended = 0;
 
-    uint8_t status = inb(0x64); if (status & 1) (void)inb(0x60); outb(0x64, 0xAE);
+    while (inb(0x64) & 1) (void)inb(0x60);
+    outb(0x64, 0xAE);
 }
 void atkbd_irq(void) {
     uint8_t scan = inb(0x60);
+    if (scan == 0xE0) { teclado.extended = 1; return; }
     uint8_t released = scan & 0x80;
     uint8_t code = scan & 0x7F;
+    uint8_t extended = teclado.extended;
+    teclado.extended = 0;
     if (code == 0x2A || code == 0x36) { teclado.shift_down = !released; return; }
     if (code == 0x1D) { teclado.control_down = !released; return; }
+    if (extended) return;
     if (released) return;
     uint8_t ch = teclado.shift_down && shifted[code] ? (uint8_t)shifted[code] : (uint8_t)keys[code];
-    if (teclado.control_down && ch >= 'a' && ch <= 'z') ch = (uint8_t)(ch - 'a' + 1);
+    if (teclado.control_down) {
+        if (ch >= 'a' && ch <= 'z') ch = (uint8_t)(ch - 'a' + 1);
+        else if (ch >= 'A' && ch <= 'Z') ch = (uint8_t)(ch - 'A' + 1);
+    }
     if (!ch) return;
     uint8_t next = (uint8_t)((teclado.head + 1) % teclado.tamanho);
     if (next != teclado.tail) { teclado.buffer[teclado.head] = ch; teclado.head = next; }
