@@ -26,7 +26,6 @@ void tss_init(void) {
 void tss_set_rsp0(uint64_t rsp0) { tss.rsp0 = rsp0; }
 uint64_t tss_get_rsp0(void) { return tss.rsp0; }
 void tss_set_ist(uint8_t index, uint64_t rsp) {
-    /* a IDT usa IST de 1 a 7, o array do tss comeca em 0 */
     if (index < 1 || index > 7) return;
     tss.ist[index - 1] = rsp;
 }

@@ -31,7 +31,6 @@ struct __attribute__((packed)) idtr {
 };
 
 static struct idt_entry idt[IDT_ENTRIES];
-/* stack reservada para o double fault, a IST1 evita falhar de novo no stack principal */
 static uint8_t df_ist_stack[4096] __attribute__((aligned(16)));
 
 extern void irq0(void);
@@ -93,7 +92,6 @@ struct exc_frame {
 
 static void idt_set_gate_full(uint8_t v, void (*handler)(void), uint8_t dpl, uint8_t ist) {
     uint64_t address = (uint64_t)handler;
-    /* 0x8E e gate de interrupcao presente com dpl 0, o offset vai em 16, 16 e 32 bits */
     uint8_t flags = (uint8_t)(IDT_INTERRUPT_GATE | ((dpl & 3) << 5));
     idt[v] = (struct idt_entry){
         (uint16_t)address, KERNEL_CS, ist, flags,
