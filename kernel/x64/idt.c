@@ -13,6 +13,7 @@
 #define KERNEL_CS          0x08
 #define DF_VECTOR          8
 #define DF_IST             1
+#define PF_VECTOR          14
 
 struct __attribute__((packed)) idt_entry {
     uint16_t low;
@@ -30,6 +31,7 @@ struct __attribute__((packed)) idtr {
 };
 
 static struct idt_entry idt[IDT_ENTRIES];
+/* stack reservada para o double fault, a IST1 evita falhar de novo no stack principal */
 static uint8_t df_ist_stack[4096] __attribute__((aligned(16)));
 
 extern void irq0(void);
@@ -91,6 +93,7 @@ struct exc_frame {
 
 static void idt_set_gate_full(uint8_t v, void (*handler)(void), uint8_t dpl, uint8_t ist) {
     uint64_t address = (uint64_t)handler;
+    /* 0x8E e gate de interrupcao presente com dpl 0, o offset vai em 16, 16 e 32 bits */
     uint8_t flags = (uint8_t)(IDT_INTERRUPT_GATE | ((dpl & 3) << 5));
     idt[v] = (struct idt_entry){
         (uint16_t)address, KERNEL_CS, ist, flags,
@@ -147,7 +150,7 @@ void exception_dispatch(struct exc_frame *f) {
     const char *name = f->exc_num < EXCEPTION_COUNT ? names[f->exc_num] : "?";
 
     kprintf("\nEXCEPTION %s err=%p rip=%p", name, (void *)f->error_code, (void *)f->rip);
-    if (f->exc_num == 14) {
+    if (f->exc_num == PF_VECTOR) {
         uint64_t cr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
         kprintf(" cr2=%p", (void *)cr2);

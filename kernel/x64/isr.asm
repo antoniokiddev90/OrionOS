@@ -44,6 +44,7 @@ exc_common:
     hlt
     jmp .hang
 
+; gera os 32 stubs de excecao, so os vetores 8, 13 e 14 tem codigo de erro
 %assign n 0
 %rep 32
 %if n == 8 || n == 13 || n == 14
