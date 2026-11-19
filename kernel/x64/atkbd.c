@@ -1,5 +1,6 @@
 #include "atkbd.h"
 #include "vga.h"
+#include <stddef.h>
 typedef struct {
     uint8_t *buffer;
     uint8_t tamanho;
@@ -15,8 +16,9 @@ static const char shifted[128] = { [2]='!',[3]='@',[4]='#',[5]='$',[6]='%',[7]='
 static inline uint8_t inb(uint16_t port) { uint8_t value; __asm__ volatile("inb %1, %0" : "=a"(value) : "Nd"(port)); return value; }
 static inline void outb(uint16_t port, uint8_t value) { __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port)); }
 void atkbd_init(void) {
+    for (size_t i = 0; i < sizeof(memoria_buffer); ++i) memoria_buffer[i] = 0;
     teclado.buffer = memoria_buffer;
-    teclado.tamanho = 128;
+    teclado.tamanho = (uint8_t)sizeof(memoria_buffer);
     teclado.head = 0;
     teclado.tail = 0;
     teclado.shift_down = 0;
@@ -39,6 +41,8 @@ void atkbd_irq(void) {
 }
 uint8_t atkbd_read_char(void) {
     if (teclado.tail == teclado.head) return 0;
-    uint8_t ch = teclado.buffer[teclado.tail]; teclado.tail = (uint8_t)((teclado.tail + 1) % teclado.tamanho);
+    uint8_t ch = teclado.buffer[teclado.tail];
+    teclado.buffer[teclado.tail] = 0;
+    teclado.tail = (uint8_t)((teclado.tail + 1) % teclado.tamanho);
     return ch;
 }
