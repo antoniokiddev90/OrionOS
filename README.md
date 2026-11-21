@@ -1,4 +1,4 @@
-# OrionOS v0.04
+# OrionOS v0.05
 
 OrionOS is a minimal operating system written in C and NASM.
 
@@ -20,6 +20,7 @@ OrionOS is a minimal operating system written in C and NASM.
 - userland shell
 - /init
 - multi-user
+- a minimal C compiler 
 ## Architecture
 
 - Target: x86 (64-bit long mode)
@@ -36,12 +37,22 @@ OrionOS is a minimal operating system written in C and NASM.
 - grub-mkrescue
 - mke2fs
 - debugfs
+- gcc (for compiler)
 
 ## How to Build
 
 ```bash
 make
 make iso
+```
+## How to use toolchain (in OrionOS)
+```bash
+make run # It comes pre-installed
+```
+
+## How to use toolchain (in host)
+```bash
+make linux # generated toolchain in build/host/bin/
 ```
 
 ## How to Run
@@ -54,4 +65,3 @@ OrionOS is developed by Antonio, an 11-year-old who likes cats (but unfortunatel
 
 ## License
 MIT License
-
