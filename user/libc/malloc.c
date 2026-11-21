@@ -15,7 +15,7 @@ struct chunk {
     struct chunk *previous_free;
 };
 
-#define CHUNK_HEADER_SIZE 16
+#define CHUNK_HEADER_SIZE sizeof(struct chunk)
 #define CHUNK_USED 1UL
 #define CHUNK_LARGE 2UL
 
@@ -121,9 +121,9 @@ static void *allocate_large(size_t size) {
     return pointer_from_chunk(chunk);
 }
 
-static void coalesce(struct chunk *chunk) {
+static struct chunk *coalesce(struct chunk *chunk) {
     struct arena *arena = arena_containing(chunk);
-    if (!arena) return;
+    if (!arena) return chunk;
     struct chunk *next = next_chunk_in_arena(arena, chunk);
     if (next && !(next->flags & CHUNK_USED)) {
         free_list_remove(next);
@@ -137,13 +137,13 @@ static void coalesce(struct chunk *chunk) {
             if (after == chunk && !(candidate->flags & CHUNK_USED)) {
                 free_list_remove(candidate);
                 candidate->size += chunk->size;
-                free_list_insert(candidate);
-                return;
+                return candidate;
             }
             if (!after) break;
             scan = after;
         }
     }
+    return chunk;
 }
 
 void *malloc(size_t size) {
@@ -171,6 +171,6 @@ void free(void *pointer) {
     }
     if (!(chunk->flags & CHUNK_USED)) return;
     chunk->flags = 0;
-    coalesce(chunk);
-    if (!(chunk->flags & CHUNK_USED)) free_list_insert(chunk);
+    chunk = coalesce(chunk);
+    free_list_insert(chunk);
 }
