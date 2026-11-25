@@ -31,11 +31,22 @@ enum {
     ORION_SYS_GETEUID = 27,
     ORION_SYS_GETEGID = 28,
     ORION_SYS_CHOWN = 29,
-    ORION_SYS_GETTICKS = 30
+    ORION_SYS_GETTICKS = 30,
+    ORION_SYS_SOCKET = 31,
+    ORION_SYS_BIND = 32,
+    ORION_SYS_LISTEN = 33,
+    ORION_SYS_ACCEPT = 34,
+    ORION_SYS_CONNECT = 35,
+    ORION_SYS_SENDTO = 36,
+    ORION_SYS_RECVFROM = 37,
+    ORION_SYS_SHUTDOWN = 38,
+    ORION_SYS_GET_NET_CONFIG = 39,
+    ORION_SYS_DHCP_RENEW = 40
 };
 long orion_syscall0(uint64_t number);
 long orion_syscall1(uint64_t number, uint64_t first);
 long orion_syscall2(uint64_t number, uint64_t first, uint64_t second);
 long orion_syscall3(uint64_t number, uint64_t first, uint64_t second, uint64_t third);
 long orion_syscall4(uint64_t number, uint64_t first, uint64_t second, uint64_t third, uint64_t fourth);
+long orion_syscall5(uint64_t number, uint64_t first, uint64_t second, uint64_t third, uint64_t fourth, uint64_t fifth);
 #endif

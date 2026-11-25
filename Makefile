@@ -13,10 +13,12 @@ CFILES=kernel/main.c \
        kernel/x64/gdt.c \
        kernel/x64/tss.c \
        kernel/x64/idt.c \
-       kernel/x64/pic.c \
-       kernel/x64/pit.c \
-       kernel/x64/atkbd.c \
-       kernel/x64/uart.c \
+	       kernel/x64/pic.c \
+	       kernel/x64/pit.c \
+	       kernel/x64/atkbd.c \
+	       kernel/x64/e1000.c \
+	       kernel/net/net.c \
+	       kernel/x64/uart.c \
        kernel/x64/vga.c \
        kernel/log/log.c \
        kernel/log/kprintf.c \
@@ -41,7 +43,7 @@ ASMFILES=boot/boot.asm \
 OBJECTS=$(CFILES:.c=.o) $(ASMFILES:.asm=.o)
 USER_PROGRAMS=$(basename $(notdir $(wildcard user/util/*.c)))
 USER_ELFS=$(addprefix build/user/,$(addsuffix .elf,$(USER_PROGRAMS)))
-USER_COMMON=build/user/start.o build/user/libc.o build/user/mman.o build/user/malloc.o
+USER_COMMON=build/user/start.o build/user/libc.o build/user/mman.o build/user/malloc.o build/user/resolver.o
 ORION_AS_OBJECTS=$(patsubst user/orion-as/%.c,build/user/orion-as/%.o,$(wildcard user/orion-as/*.c))
 ORION_LD_OBJECTS=$(patsubst user/orion-ld/%.c,build/user/orion-ld/%.o,$(wildcard user/orion-ld/*.c))
 ORION_CC_OBJECTS=$(patsubst user/orion-cc/%.c,build/user/orion-cc/%.o,$(wildcard user/orion-cc/*.c))
@@ -60,7 +62,7 @@ endif
 >$(NASM) $(ASFLAGS) $< -o $@
 build/user:
 >mkdir -p build/user
-build/user/libc.o: user/libc/libc.c user/libc/include/stddef.h user/libc/include/stdint.h user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/string.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/sys/stat.h user/libc/include/syscalls.h | build/user
+build/user/libc.o: user/libc/libc.c user/libc/include/stddef.h user/libc/include/stdint.h user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/string.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/sys/stat.h user/libc/include/syscalls.h user/libc/include/sys/network.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
 build/user/start.o: user/libc/start.c user/libc/include/stdint.h user/libc/include/stdlib.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -68,9 +70,11 @@ build/user/mman.o: user/libc/mman.c user/libc/include/sys/mman.h user/libc/inclu
 >$(CC) $(USER_CFLAGS) -c $< -o $@
 build/user/malloc.o: user/libc/malloc.c user/libc/include/stdlib.h user/libc/include/sys/mman.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
+build/user/resolver.o: user/libc/resolver.c user/libc/include/sys/dns.h user/libc/include/sys/network.h | build/user
+>$(CC) $(USER_CFLAGS) -c $< -o $@
 build/user/init.o: user/init.c user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/unistd.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
-build/user/%.o: user/util/%.c user/util/common.h user/libc/include/stdio.h user/libc/include/unistd.h user/libc/include/fcntl.h | build/user
+build/user/%.o: user/util/%.c user/util/common.h user/libc/include/stdio.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/arpa/inet.h user/libc/include/netinet/in.h user/libc/include/sys/socket.h user/libc/include/sys/network.h user/libc/include/sys/dns.h | build/user
 >$(CC) $(USER_CFLAGS) -Iuser/util -c $< -o $@
 build/user/orion-cc:
 >mkdir -p build/user/orion-cc
@@ -111,7 +115,7 @@ iso: kernel.elf
 disk: user
 >tools/disk.sh $(DISK_IMAGE) build/user
 run: iso disk
->qemu-system-x86_64 -cdrom orionos.iso -drive file=$(DISK_IMAGE),format=raw,if=ide -m 256M -serial stdio
+>qemu-system-x86_64 -cdrom orionos.iso -drive file=$(DISK_IMAGE),format=raw,if=ide -m 256M -nic user,model=e1000 -serial stdio
 clean:
 >rm -rf $(OBJECTS) kernel.elf orionos.iso build
 .PHONY: all user iso disk clean run linux linux-toolchain

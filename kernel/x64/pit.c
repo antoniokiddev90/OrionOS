@@ -1,5 +1,6 @@
 #include "pit.h"
 #include "sched/task.h"
+#include "../net/net.h"
 
 static volatile uint64_t ticks;
 
@@ -17,6 +18,7 @@ void pit_init(uint32_t frequency) {
 
 void pit_irq(void) {
     ++ticks;
+    net_poll();
     sched_set_need_resched();
 }
 

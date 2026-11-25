@@ -1,4 +1,4 @@
-# OrionOS v0.05
+# OrionOS v0.06
 
 OrionOS is a minimal operating system written in C and NASM.
 
@@ -20,7 +20,11 @@ OrionOS is a minimal operating system written in C and NASM.
 - userland shell
 - /init
 - multi-user
-- a minimal C compiler 
+- minimal C compiler 
+- E1000 driver
+- Net stack
+- Net shell utils (ping, wget etc.)
+
 ## Architecture
 
 - Target: x86 (64-bit long mode)

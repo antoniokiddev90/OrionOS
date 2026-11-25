@@ -45,6 +45,25 @@ uint64_t pmm_alloc_frame(void) {
     return 0;
 }
 
+uint64_t pmm_alloc_frame_below(uint64_t limit) {
+    uint64_t limit_frames = limit / PMM_FRAME_SIZE;
+    if (!limit_frames || !total_frames) return 0;
+    if (limit_frames > total_frames) limit_frames = total_frames;
+    uint64_t start = next_free < limit_frames ? next_free : 0;
+    for (uint64_t scanned = 0; scanned < limit_frames; ++scanned) {
+        uint64_t index = start + scanned;
+        if (index >= limit_frames) index -= limit_frames;
+        if (!bit_get(index)) {
+            bit_set(index);
+            ++used_frames;
+            next_free = index + 1;
+            if (next_free >= total_frames) next_free = 0;
+            return index * PMM_FRAME_SIZE;
+        }
+    }
+    return 0;
+}
+
 void pmm_free_frame(uint64_t frame) {
     uint64_t idx = frame / PMM_FRAME_SIZE;
     if (idx >= total_frames) return;

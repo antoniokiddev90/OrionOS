@@ -5,6 +5,7 @@
 #include "x64/tss.h"
 #include "log/kprintf.h"
 #include "../mm/user_mmap.h"
+#include "net/net.h"
 
 static struct task *pick_next(struct task *start);
 static struct task *current;
@@ -101,6 +102,7 @@ int task_replace_address_space(uint64_t *pml4) {
 }
 void task_exit(uint32_t status) {
     if (!current || current == idle_task) return;
+    net_close_owner(current->pid);
     current->exit_status = status;
     current->state = TASK_DEAD;
     for (struct task *task = idle_task->next; task != idle_task; task = task->next) {

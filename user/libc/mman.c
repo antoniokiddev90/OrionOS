@@ -5,7 +5,16 @@
 
 long orion_syscall4(uint64_t number, uint64_t first, uint64_t second, uint64_t third, uint64_t fourth) {
     uint64_t result;
-    __asm__ volatile("int $0x9E" : "=a"(result) : "a"(number), "D"(first), "S"(second), "d"(third), "c"(fourth) : "r11", "memory");
+    register uint64_t fourth_register __asm__("r10") = fourth;
+    __asm__ volatile("int $0x9E" : "=a"(result) : "a"(number), "D"(first), "S"(second), "d"(third), "r"(fourth_register) : "rcx", "r11", "memory");
+    return (long)result;
+}
+
+long orion_syscall5(uint64_t number, uint64_t first, uint64_t second, uint64_t third, uint64_t fourth, uint64_t fifth) {
+    uint64_t result;
+    register uint64_t fourth_register __asm__("r10") = fourth;
+    register uint64_t fifth_register __asm__("r8") = fifth;
+    __asm__ volatile("int $0x9E" : "=a"(result) : "a"(number), "D"(first), "S"(second), "d"(third), "r"(fourth_register), "r"(fifth_register) : "rcx", "r11", "memory");
     return (long)result;
 }
 

@@ -5,6 +5,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <syscalls.h>
+#include <sys/socket.h>
+#include <sys/network.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #define LIBC_HEAP_SIZE 65536
 static unsigned char libc_heap[LIBC_HEAP_SIZE];
 static size_t libc_heap_used;
@@ -71,6 +75,51 @@ uid_t geteuid(void) { return (uid_t)orion_syscall0(ORION_SYS_GETEUID); }
 gid_t getegid(void) { return (gid_t)orion_syscall0(ORION_SYS_GETEGID); }
 int chown(const char *path, uid_t uid, gid_t gid) { return (int)orion_syscall3(ORION_SYS_CHOWN, (uint64_t)path, (uint64_t)uid, (uint64_t)gid); }
 uint64_t getticks(void) { return (uint64_t)orion_syscall0(ORION_SYS_GETTICKS); }
+int orion_get_network_config(struct orion_network_config *config) { return (int)orion_syscall1(ORION_SYS_GET_NET_CONFIG, (uint64_t)config); }
+int orion_dhcp_renew(void) { return (int)orion_syscall0(ORION_SYS_DHCP_RENEW); }
+int socket(int domain, int type, int protocol) { return (int)orion_syscall3(ORION_SYS_SOCKET, (uint64_t)domain, (uint64_t)type, (uint64_t)protocol); }
+int bind(int descriptor, const struct sockaddr *address, socklen_t length) { return (int)orion_syscall3(ORION_SYS_BIND, (uint64_t)descriptor, (uint64_t)address, (uint64_t)length); }
+int listen(int descriptor, int backlog) { return (int)orion_syscall2(ORION_SYS_LISTEN, (uint64_t)descriptor, (uint64_t)backlog); }
+__attribute__((weak)) int accept(int descriptor, struct sockaddr *address, socklen_t *length) { return (int)orion_syscall3(ORION_SYS_ACCEPT, (uint64_t)descriptor, (uint64_t)address, (uint64_t)length); }
+int connect(int descriptor, const struct sockaddr *address, socklen_t length) { return (int)orion_syscall3(ORION_SYS_CONNECT, (uint64_t)descriptor, (uint64_t)address, (uint64_t)length); }
+ssize_t sendto(int descriptor, const void *buffer, size_t length, int flags, const struct sockaddr *destination, socklen_t destination_length) {
+    if (destination && destination_length < sizeof(struct sockaddr_in)) return -1;
+    return (ssize_t)orion_syscall5(ORION_SYS_SENDTO, (uint64_t)descriptor, (uint64_t)buffer, length, (uint64_t)flags, (uint64_t)destination);
+}
+ssize_t recvfrom(int descriptor, void *buffer, size_t length, int flags, struct sockaddr *source, socklen_t *source_length) {
+    if (source && (!source_length || *source_length < sizeof(struct sockaddr_in))) return -1;
+    ssize_t result = (ssize_t)orion_syscall5(ORION_SYS_RECVFROM, (uint64_t)descriptor, (uint64_t)buffer, length, (uint64_t)flags, (uint64_t)source);
+    if (result >= 0 && source) *source_length = sizeof(struct sockaddr_in);
+    return result;
+}
+ssize_t send(int descriptor, const void *buffer, size_t length, int flags) { return sendto(descriptor, buffer, length, flags, NULL, 0); }
+ssize_t recv(int descriptor, void *buffer, size_t length, int flags) { return recvfrom(descriptor, buffer, length, flags, NULL, NULL); }
+int shutdown(int descriptor, int how) { return (int)orion_syscall2(ORION_SYS_SHUTDOWN, (uint64_t)descriptor, (uint64_t)how); }
+in_addr_t inet_addr(const char *text) {
+    if (!text) return INADDR_NONE;
+    uint8_t octets[4];
+    const char *cursor = text;
+    for (size_t i = 0; i < 4; ++i) {
+        if (*cursor < '0' || *cursor > '9') return INADDR_NONE;
+        uint32_t value = 0;
+        size_t digits = 0;
+        while (*cursor >= '0' && *cursor <= '9') {
+            value = value * 10 + (uint32_t)(*cursor - '0');
+            if (value > 255 || ++digits > 3) return INADDR_NONE;
+            ++cursor;
+        }
+        octets[i] = (uint8_t)value;
+        if (i < 3) {
+            if (*cursor != '.') return INADDR_NONE;
+            ++cursor;
+        }
+    }
+    if (*cursor) return INADDR_NONE;
+    in_addr_t address;
+    unsigned char *bytes = (unsigned char *)&address;
+    for (size_t i = 0; i < 4; ++i) bytes[i] = octets[i];
+    return address;
+}
 int stat(const char *path, struct stat *status) { return (int)orion_syscall2(ORION_SYS_STAT, (uint64_t)path, (uint64_t)status); }
 int fstat(int descriptor, struct stat *status) { return (int)orion_syscall2(ORION_SYS_FSTAT, (uint64_t)descriptor, (uint64_t)status); }
 int mkdir(const char *path, mode_t mode) { (void)mode; return (int)orion_syscall1(ORION_SYS_MKDIR, (uint64_t)path); }

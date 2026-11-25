@@ -14,6 +14,7 @@ struct pmm_region {
 
 void     pmm_init(struct pmm_region *regions, int count, uint64_t kernel_end);
 uint64_t pmm_alloc_frame(void);
+uint64_t pmm_alloc_frame_below(uint64_t limit);
 void     pmm_free_frame(uint64_t frame);
 uint64_t pmm_total_frames(void);
 uint64_t pmm_used_frames(void);

@@ -9,6 +9,7 @@
 #include "../mm/heap.h"
 #include "../mm/user_mmap.h"
 #include "../x64/pit.h"
+#include "../net/net.h"
 #include <stdint.h>
 #include <stddef.h>
 #define SYS_WRITE 1
@@ -41,6 +42,16 @@
 #define SYS_GETEGID 28
 #define SYS_CHOWN 29
 #define SYS_GETTICKS 30
+#define SYS_SOCKET 31
+#define SYS_BIND 32
+#define SYS_LISTEN 33
+#define SYS_ACCEPT 34
+#define SYS_CONNECT 35
+#define SYS_SENDTO 36
+#define SYS_RECVFROM 37
+#define SYS_SHUTDOWN 38
+#define SYS_GET_NET_CONFIG 39
+#define SYS_DHCP_RENEW 40
 #define USER_ARG_MAX 16
 #define USER_STRING_MAX 255
 #define USER_IO_MAX 65536
@@ -86,6 +97,48 @@ static size_t string_length(const char *text) {
     size_t length = 0;
     while (text[length]) ++length;
     return length;
+}
+static uint16_t network_read_be16(const uint8_t *bytes) {
+    return (uint16_t)(((uint16_t)bytes[0] << 8) | bytes[1]);
+}
+static uint32_t network_read_be32(const uint8_t *bytes) {
+    return ((uint32_t)bytes[0] << 24) | ((uint32_t)bytes[1] << 16) |
+           ((uint32_t)bytes[2] << 8) | bytes[3];
+}
+static void network_write_be16(uint8_t *bytes, uint16_t value) {
+    bytes[0] = (uint8_t)(value >> 8);
+    bytes[1] = (uint8_t)value;
+}
+static void network_write_be32(uint8_t *bytes, uint32_t value) {
+    bytes[0] = (uint8_t)(value >> 24);
+    bytes[1] = (uint8_t)(value >> 16);
+    bytes[2] = (uint8_t)(value >> 8);
+    bytes[3] = (uint8_t)value;
+}
+static int copy_sockaddr_from_user(uint64_t address, uint64_t length, uint32_t *ipv4, uint16_t *port) {
+    if (!address || length < sizeof(struct net_sockaddr_in) ||
+        !user_range_readable(address, sizeof(struct net_sockaddr_in))) return -1;
+    const struct net_sockaddr_in *input = (const struct net_sockaddr_in *)address;
+    if (input->family != NET_AF_INET) return -1;
+    const uint8_t *bytes = (const uint8_t *)input;
+    *port = network_read_be16(bytes + 2);
+    *ipv4 = network_read_be32(bytes + 4);
+    return 0;
+}
+static int copy_sockaddr_to_user(uint64_t address, uint32_t ipv4, uint16_t port) {
+    if (!address || !user_range_writable(address, sizeof(struct net_sockaddr_in))) return -1;
+    struct net_sockaddr_in output;
+    uint8_t *bytes = (uint8_t *)&output;
+    for (size_t i = 0; i < sizeof(output); ++i) bytes[i] = 0;
+    output.family = NET_AF_INET;
+    network_write_be16(bytes + 2, port);
+    network_write_be32(bytes + 4, ipv4);
+    *(struct net_sockaddr_in *)address = output;
+    return 0;
+}
+static uint64_t network_owner(void) {
+    struct task *task = task_current();
+    return task ? task->pid : 0;
 }
 static int resolve_path(const char *path, char *output) {
     if (!path || !*path || !output) return -1;
@@ -189,6 +242,7 @@ static uint64_t sys_setgid(uint64_t gid) {
 
 static uint64_t sys_write(int descriptor, uint64_t buffer, size_t length) {
     if (length > USER_IO_MAX || (length && !user_range_readable(buffer, length))) return (uint64_t)-1;
+    if (descriptor >= NET_FD_BASE) return (uint64_t)net_socket_sendto(descriptor, network_owner(), (const void *)buffer, length, 0, 0, 0, 0);
     if (descriptor == 1 || descriptor == 2 || vfs_is_tty(descriptor)) {
         for (size_t i = 0; i < length; ++i) log_putc(((const char *)buffer)[i]);
         return length;
@@ -214,6 +268,7 @@ static uint64_t read_keyboard(uint64_t buffer, size_t length) {
 static uint64_t sys_read(int descriptor, uint64_t buffer, size_t length) {
     if (descriptor == 0 || vfs_is_tty(descriptor)) return read_keyboard(buffer, length);
     if (length > USER_IO_MAX || (length && !user_range_writable(buffer, length))) return (uint64_t)-1;
+    if (descriptor >= NET_FD_BASE) return (uint64_t)net_socket_recvfrom(descriptor, network_owner(), (void *)buffer, length, 0, 0, NULL, NULL);
     if (descriptor < 3) return (uint64_t)-1;
     return (uint64_t)vfs_read(descriptor, (void *)buffer, length);
 }
@@ -285,12 +340,77 @@ static uint64_t sys_stat(uint64_t path_address, uint64_t status_address) {
     if (copy_user_string(user_path, path_address, sizeof(user_path)) != 0 || resolve_path(user_path, path) != 0 || vfs_stat_path(path, &status) != 0) return (uint64_t)-1;
     return copy_stat_to_user(status_address, &status) == 0 ? 0 : (uint64_t)-1;
 }
+static uint64_t sys_socket(uint64_t domain, uint64_t type, uint64_t protocol) {
+    return (uint64_t)net_socket_create((int)domain, (int)type, (int)protocol, network_owner());
+}
+static uint64_t sys_bind(uint64_t descriptor, uint64_t address, uint64_t length) {
+    uint32_t ipv4;
+    uint16_t port;
+    if (copy_sockaddr_from_user(address, length, &ipv4, &port) != 0) return (uint64_t)-1;
+    return (uint64_t)net_socket_bind((int)descriptor, network_owner(), ipv4, port);
+}
+static uint64_t sys_listen(uint64_t descriptor, uint64_t backlog) {
+    return (uint64_t)net_socket_listen((int)descriptor, network_owner(), (int)backlog);
+}
+static uint64_t sys_accept(uint64_t descriptor, uint64_t address, uint64_t length_address) {
+    uint32_t capacity = 0;
+    if (address) {
+        if (!length_address || !user_range_readable(length_address, sizeof(uint32_t)) ||
+            !user_range_writable(length_address, sizeof(uint32_t)) ||
+            !user_range_writable(address, sizeof(struct net_sockaddr_in))) return (uint64_t)-1;
+        capacity = *(const uint32_t *)length_address;
+        if (capacity < sizeof(struct net_sockaddr_in)) return (uint64_t)-1;
+    }
+    uint32_t ipv4 = 0;
+    uint16_t port = 0;
+    int accepted = net_socket_accept((int)descriptor, network_owner(), 0, &ipv4, &port);
+    if (accepted < 0) return (uint64_t)-1;
+    if (address && (copy_sockaddr_to_user(address, ipv4, port) != 0)) {
+        (void)net_socket_close(accepted, network_owner());
+        return (uint64_t)-1;
+    }
+    if (address) *(uint32_t *)length_address = sizeof(struct net_sockaddr_in);
+    return (uint64_t)accepted;
+}
+static uint64_t sys_connect(uint64_t descriptor, uint64_t address, uint64_t length) {
+    uint32_t ipv4;
+    uint16_t port;
+    if (copy_sockaddr_from_user(address, length, &ipv4, &port) != 0) return (uint64_t)-1;
+    return (uint64_t)net_socket_connect((int)descriptor, network_owner(), ipv4, port);
+}
+static uint64_t sys_sendto(uint64_t descriptor, uint64_t buffer, uint64_t length, uint64_t flags, uint64_t address) {
+    uint32_t ipv4 = 0;
+    uint16_t port = 0;
+    if (length > USER_IO_MAX || (length && !user_range_readable(buffer, (size_t)length))) return (uint64_t)-1;
+    if (address && copy_sockaddr_from_user(address, sizeof(struct net_sockaddr_in), &ipv4, &port) != 0) return (uint64_t)-1;
+    return (uint64_t)net_socket_sendto((int)descriptor, network_owner(), (const void *)buffer, (size_t)length,
+                                       (int)flags, address != 0, ipv4, port);
+}
+static uint64_t sys_recvfrom(uint64_t descriptor, uint64_t buffer, uint64_t length, uint64_t flags, uint64_t address) {
+    if (length > USER_IO_MAX || (length && !user_range_writable(buffer, (size_t)length))) return (uint64_t)-1;
+    if (address && !user_range_writable(address, sizeof(struct net_sockaddr_in))) return (uint64_t)-1;
+    uint32_t ipv4 = 0;
+    uint16_t port = 0;
+    long result = net_socket_recvfrom((int)descriptor, network_owner(), (void *)buffer, (size_t)length,
+                                      (int)flags, address != 0, &ipv4, &port);
+    if (result >= 0 && address && copy_sockaddr_to_user(address, ipv4, port) != 0) return (uint64_t)-1;
+    return (uint64_t)result;
+}
+static uint64_t sys_shutdown(uint64_t descriptor, uint64_t how) {
+    return (uint64_t)net_socket_shutdown((int)descriptor, network_owner(), (int)how);
+}
+static uint64_t sys_get_net_config(uint64_t address) {
+    struct net_config config;
+    if (!user_range_writable(address, sizeof(config)) || net_get_config(&config) != 0) return (uint64_t)-1;
+    *(struct net_config *)address = config;
+    return 0;
+}
 uint64_t syscall_dispatch(uint64_t number, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t *frame) {
     switch (number) {
         case SYS_WRITE: return sys_write((int)a1, a2, (size_t)a3);
         case SYS_READ: return sys_read((int)a1, a2, (size_t)a3);
         case SYS_OPEN: return sys_open(a1, (int)a2, (uint32_t)a3);
-        case SYS_CLOSE: return (uint64_t)vfs_close((int)a1);
+        case SYS_CLOSE: return (uint64_t)(a1 >= NET_FD_BASE ? net_socket_close((int)a1, network_owner()) : vfs_close((int)a1));
         case SYS_LSEEK: return (uint64_t)vfs_seek((int)a1, (int64_t)a2, (int)a3);
         case SYS_FORK: return task_fork(frame);
         case SYS_EXECVE: return sys_execve(a1, a2, frame);
@@ -368,6 +488,16 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a1, uint64_t a2, uint64_t a3
         case SYS_GETTICKS: return pit_ticks();
         case SYS_MMAP: return (uint64_t)user_mmap(a1, a2, a3, a4);
         case SYS_MUNMAP: return (uint64_t)user_munmap(a1, a2);
+        case SYS_SOCKET: return sys_socket(a1, a2, a3);
+        case SYS_BIND: return sys_bind(a1, a2, a3);
+        case SYS_LISTEN: return sys_listen(a1, a2);
+        case SYS_ACCEPT: return sys_accept(a1, a2, a3);
+        case SYS_CONNECT: return sys_connect(a1, a2, a3);
+        case SYS_SENDTO: return sys_sendto(a1, a2, a3, a4, a5);
+        case SYS_RECVFROM: return sys_recvfrom(a1, a2, a3, a4, a5);
+        case SYS_SHUTDOWN: return sys_shutdown(a1, a2);
+        case SYS_GET_NET_CONFIG: return sys_get_net_config(a1);
+        case SYS_DHCP_RENEW: return (uint64_t)net_dhcp_renew();
         default: (void)a4; (void)a5; return (uint64_t)-1;
     }
 }
