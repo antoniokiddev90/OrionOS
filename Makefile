@@ -8,6 +8,11 @@ NASM=nasm
 CFLAGS=--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector -fno-pic -fno-builtin -mno-red-zone -mcmodel=kernel -Wall -Wextra -O2 -Ikernel -mno-sse -mno-sse2 -mno-mmx
 USER_CFLAGS=--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector -fno-pic -fno-pie -fno-builtin -mno-red-zone -Wall -Wextra -O2 -Iuser/libc/include -mno-sse -mno-sse2 -mno-mmx
 ASFLAGS=-f elf64
+QEMU_CPU ?= max
+QEMU_EXTRA_ARGS ?=
+PKG_OBJECTS=$(patsubst user/pkg/%.c,build/user/pkg/%.o,$(wildcard user/pkg/*.c))
+TLS_OBJECTS=$(patsubst user/lib/tls/%.c,build/user/lib/tls/%.o,$(wildcard user/lib/tls/*.c))
+TLS_LIBRARY=build/user/liboriontls.a
 CFILES=kernel/main.c \
        kernel/x64/init.c \
        kernel/x64/gdt.c \
@@ -42,7 +47,7 @@ ASMFILES=boot/boot.asm \
          kernel/x64/isr.asm
 OBJECTS=$(CFILES:.c=.o) $(ASMFILES:.asm=.o)
 USER_PROGRAMS=$(basename $(notdir $(wildcard user/util/*.c)))
-USER_ELFS=$(addprefix build/user/,$(addsuffix .elf,$(USER_PROGRAMS)))
+USER_ELFS=$(addprefix build/user/,$(addsuffix .elf,$(USER_PROGRAMS))) build/user/pkg.elf
 USER_COMMON=build/user/start.o build/user/libc.o build/user/mman.o build/user/malloc.o build/user/resolver.o
 ORION_AS_OBJECTS=$(patsubst user/orion-as/%.c,build/user/orion-as/%.o,$(wildcard user/orion-as/*.c))
 ORION_LD_OBJECTS=$(patsubst user/orion-ld/%.c,build/user/orion-ld/%.o,$(wildcard user/orion-ld/*.c))
@@ -74,8 +79,22 @@ build/user/resolver.o: user/libc/resolver.c user/libc/include/sys/dns.h user/lib
 >$(CC) $(USER_CFLAGS) -c $< -o $@
 build/user/init.o: user/init.c user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/unistd.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
-build/user/%.o: user/util/%.c user/util/common.h user/libc/include/stdio.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/arpa/inet.h user/libc/include/netinet/in.h user/libc/include/sys/socket.h user/libc/include/sys/network.h user/libc/include/sys/dns.h | build/user
->$(CC) $(USER_CFLAGS) -Iuser/util -c $< -o $@
+build/user/%.o: user/util/%.c user/util/common.h user/lib/tls/orion_tls.h user/libc/include/stdio.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/arpa/inet.h user/libc/include/netinet/in.h user/libc/include/sys/socket.h user/libc/include/sys/network.h user/libc/include/sys/dns.h | build/user
+>$(CC) $(USER_CFLAGS) -Iuser/util -Iuser/lib/tls -c $< -o $@
+build/user/lib/tls:
+>mkdir -p $@
+build/user/lib/tls/%.o: user/lib/tls/%.c user/lib/tls/tls_internal.h user/lib/tls/orion_tls.h | build/user/lib/tls
+>$(CC) $(USER_CFLAGS) -Iuser/lib/tls -c $< -o $@
+build/user/liboriontls.a: $(TLS_OBJECTS)
+>$(AR) rcs $@ $(TLS_OBJECTS)
+build/user/pkg:
+>mkdir -p build/user/pkg
+build/user/pkg/%.o: user/pkg/%.c user/pkg/pkg.h user/lib/tls/orion_tls.h | build/user/pkg
+>$(CC) $(USER_CFLAGS) -Iuser/pkg -Iuser/lib/tls -c $< -o $@
+build/user/pkg.elf: $(PKG_OBJECTS) $(USER_COMMON) $(TLS_LIBRARY) user/user.ld
+>$(LD) -nostdlib -static -z max-page-size=0x1000 -T user/user.ld -o $@ $(USER_COMMON) $(PKG_OBJECTS) $(TLS_LIBRARY)
+build/user/wget.elf: build/user/wget.o $(USER_COMMON) $(TLS_LIBRARY) user/user.ld
+>$(LD) -nostdlib -static -z max-page-size=0x1000 -T user/user.ld -o $@ $(USER_COMMON) build/user/wget.o $(TLS_LIBRARY)
 build/user/orion-cc:
 >mkdir -p build/user/orion-cc
 build/user/orion-cc/%.o: user/orion-cc/%.c user/orion-cc/compiler.h | build/user/orion-cc
@@ -113,9 +132,9 @@ iso: kernel.elf
 >cp boot/grub.cfg build/iso/boot/grub/grub.cfg
 >grub-mkrescue -o orionos.iso build/iso
 disk: user
->tools/disk.sh $(DISK_IMAGE) build/user
+>bash tools/disk.sh $(DISK_IMAGE) build/user
 run: iso disk
->qemu-system-x86_64 -cdrom orionos.iso -drive file=$(DISK_IMAGE),format=raw,if=ide -m 256M -nic user,model=e1000 -serial stdio
+>qemu-system-x86_64 -cpu $(QEMU_CPU) $(QEMU_EXTRA_ARGS) -cdrom orionos.iso -drive file=$(DISK_IMAGE),format=raw,if=ide -m 256M -nic user,model=e1000 -serial stdio
 clean:
 >rm -rf $(OBJECTS) kernel.elf orionos.iso build
 .PHONY: all user iso disk clean run linux linux-toolchain

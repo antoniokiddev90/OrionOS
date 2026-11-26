@@ -10,7 +10,7 @@
 #define ELF_ET_EXEC 2
 #define ELF_EM_X86_64 62
 #define USER_STACK_TOP 0x000000007FFFF000ULL
-#define USER_STACK_PAGES 8
+#define USER_STACK_PAGES 32
 #define ELF_MAX_SIZE (16ULL * 1024 * 1024)
 struct elf64_header {
     uint8_t ident[16];

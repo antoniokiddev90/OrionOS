@@ -15,7 +15,7 @@ void kernel_main(uint32_t mb_magic, uint32_t mb_info) {
     uart_init();
     vga_clear();
     x64_init();
-    kprintf("OrionOS v0.06 x86_64\n");
+    kprintf("OrionOS v0.07 x86_64\n");
     x64_mm_init(mb_magic, mb_info, (uint64_t)&_kernel_end);
     kprintf("mm ok\n");
 

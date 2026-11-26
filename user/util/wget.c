@@ -7,6 +7,7 @@
 #include <sys/dns.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "orion_tls.h"
 
 #define HEADER_CAPACITY 2048
 #define NETWORK_BUFFER_SIZE 512
@@ -52,13 +53,14 @@ static int append_number(char *destination, size_t capacity, size_t *used, unsig
     return 0;
 }
 
-static int parse_port(const char *text, uint16_t *port) {
-    if (!*text) return -1;
+static int parse_port(const char *text, size_t length, uint16_t *port) {
+    if (!length) return -1;
     unsigned value = 0;
-    for (const char *cursor = text; *cursor; ++cursor) {
-        if (*cursor < '0' || *cursor > '9') return -1;
-        value = value * 10 + (unsigned)(*cursor - '0');
-        if (value > 65535) return -1;
+    for (size_t index = 0; index < length; ++index) {
+        if (text[index] < '0' || text[index] > '9') return -1;
+        unsigned digit = (unsigned)(text[index] - '0');
+        if (value > (65535u - digit) / 10u) return -1;
+        value = value * 10 + digit;
     }
     if (!value) return -1;
     *port = (uint16_t)value;
@@ -66,9 +68,19 @@ static int parse_port(const char *text, uint16_t *port) {
 }
 
 static int parse_url(const char *url, char *host, size_t host_capacity, char *path, size_t path_capacity,
-                     uint16_t *port) {
-    if (strncmp(url, "http://", 7) != 0) return -1;
-    const char *authority = url + 7;
+                     uint16_t *port, int *secure) {
+    const char *authority;
+    if (strncmp(url, "https://", 8) == 0) {
+        *secure = 1;
+        *port = 443;
+        authority = url + 8;
+    } else if (strncmp(url, "http://", 7) == 0) {
+        *secure = 0;
+        *port = 80;
+        authority = url + 7;
+    } else {
+        return -1;
+    }
     const char *cursor = authority;
     while (*cursor && *cursor != '/' && *cursor != '?' && *cursor != '#') ++cursor;
     size_t authority_length = (size_t)(cursor - authority);
@@ -85,8 +97,7 @@ static int parse_url(const char *url, char *host, size_t host_capacity, char *pa
     if (!host_length || host_length >= host_capacity) return -1;
     memcpy(host, authority, host_length);
     host[host_length] = 0;
-    *port = 80;
-    if (colon && parse_port(colon + 1, port) != 0) return -1;
+    if (colon && parse_port(colon + 1, authority_length - host_length - 1, port) != 0) return -1;
 
     size_t path_used = 0;
     path[0] = 0;
@@ -129,14 +140,16 @@ static int append_header(char *request, size_t capacity, size_t *used, const cha
     return append_text(request, capacity, used, text);
 }
 
-static int build_request(char *request, size_t capacity, const char *path, const char *host, uint16_t port) {
+static int build_request(char *request, size_t capacity, const char *path, const char *host, uint16_t port,
+                         int secure) {
     size_t used = 0;
     request[0] = 0;
     if (append_header(request, capacity, &used, "GET ") != 0 ||
         append_header(request, capacity, &used, path) != 0 ||
         append_header(request, capacity, &used, " HTTP/1.0\r\nHost: ") != 0 ||
         append_header(request, capacity, &used, host) != 0) return -1;
-    if (port != 80 && (append_header(request, capacity, &used, ":") != 0 ||
+    uint16_t default_port = secure ? 443 : 80;
+    if (port != default_port && (append_header(request, capacity, &used, ":") != 0 ||
                        append_number(request, capacity, &used, port) != 0)) return -1;
     if (append_header(request, capacity, &used, "\r\nUser-Agent: OrionOS wget/1.0\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n") != 0) return -1;
     return (int)used;
@@ -150,14 +163,15 @@ static char *find_crlf(char *text) {
     return NULL;
 }
 
-static int read_response_headers(int descriptor, char *headers, size_t capacity,
+static int read_response_headers(int descriptor, int secure, char *headers, size_t capacity,
                                  uint8_t *initial_body, size_t *initial_length, size_t *header_length) {
     uint8_t buffer[NETWORK_BUFFER_SIZE];
     size_t used = 0;
     uint64_t last_activity = getticks();
     *initial_length = 0;
     for (;;) {
-        ssize_t length = recv(descriptor, buffer, sizeof(buffer), 0);
+        ssize_t length = secure ? orion_tls_recv(descriptor, buffer, sizeof(buffer)) :
+                                 recv(descriptor, buffer, sizeof(buffer), 0);
         if (length == 0) return -1;
         if (length < 0) {
             if (getticks() - last_activity >= RECEIVE_TIMEOUT_TICKS) return -1;
@@ -314,8 +328,8 @@ static int consume_chunked(int output, const uint8_t *buffer, size_t length, str
     return decoder->state == CHUNK_DONE ? 1 : 0;
 }
 
-static int receive_data(int descriptor, uint8_t *buffer, size_t capacity, uint64_t *last_activity) {
-    ssize_t result = recv(descriptor, buffer, capacity, 0);
+static int receive_data(int descriptor, int secure, uint8_t *buffer, size_t capacity, uint64_t *last_activity) {
+    ssize_t result = secure ? orion_tls_recv(descriptor, buffer, capacity) : recv(descriptor, buffer, capacity, 0);
     if (result > 0) {
         *last_activity = getticks();
         return (int)result;
@@ -326,34 +340,40 @@ static int receive_data(int descriptor, uint8_t *buffer, size_t capacity, uint64
     return -1;
 }
 
+static void close_network(int descriptor, int secure) {
+    if (secure) orion_tls_close(descriptor);
+    close(descriptor);
+}
+
 int main(int argc, char **argv) {
     const char *url = NULL;
     const char *requested_output = NULL;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-O") == 0) {
             if (++i >= argc || requested_output) {
-                puts("Usage: wget [-O file] http://host[:port]/path");
+                puts("Usage: wget [-O file] http://host[:port]/path | https://host[:port]/path");
                 return 2;
             }
             requested_output = argv[i];
         } else if (argv[i][0] == '-' || url) {
-            puts("Usage: wget [-O file] http://host[:port]/path");
+            puts("Usage: wget [-O file] http://host[:port]/path | https://host[:port]/path");
             return 2;
         } else {
             url = argv[i];
         }
     }
     if (!url) {
-        puts("Usage: wget [-O file] http://host[:port]/path");
+        puts("Usage: wget [-O file] http://host[:port]/path | https://host[:port]/path");
         return 2;
     }
 
     char host[254];
     char path[512];
     uint16_t port;
+    int secure;
     in_addr_t address;
-    if (parse_url(url, host, sizeof(host), path, sizeof(path), &port) != 0) {
-        puts("wget: only HTTP URLs with a valid hostname or IPv4 address are supported");
+    if (parse_url(url, host, sizeof(host), path, sizeof(path), &port, &secure) != 0) {
+        puts("wget: only HTTP or HTTPS URLs with a valid hostname or IPv4 address are supported");
         return 2;
     }
     address = inet_addr(host);
@@ -380,7 +400,7 @@ int main(int argc, char **argv) {
     }
 
     char request[1024];
-    int request_length = build_request(request, sizeof(request), path, host, port);
+    int request_length = build_request(request, sizeof(request), path, host, port, secure);
     if (request_length < 0) {
         puts("wget: request is too large");
         return 2;
@@ -402,13 +422,22 @@ int main(int argc, char **argv) {
         close(network);
         return 1;
     }
+    if (secure) {
+        puts("wget: WARNING: TLS certificate verification is disabled; connection may be intercepted.");
+        if (orion_tls_connect(network, host) != 0) {
+            puts("wget: TLS handshake failed");
+            close_network(network, secure);
+            return 1;
+        }
+    }
 
     size_t sent = 0;
     while (sent < (size_t)request_length) {
-        ssize_t amount = send(network, request + sent, (size_t)request_length - sent, 0);
+        ssize_t amount = secure ? orion_tls_send(network, request + sent, (size_t)request_length - sent) :
+                                  send(network, request + sent, (size_t)request_length - sent, 0);
         if (amount <= 0) {
             puts("wget: request transmission failed");
-            close(network);
+            close_network(network, secure);
             return 1;
         }
         sent += (size_t)amount;
@@ -418,10 +447,10 @@ int main(int argc, char **argv) {
     uint8_t initial_body[NETWORK_BUFFER_SIZE];
     size_t initial_length = 0;
     size_t header_length = 0;
-    if (read_response_headers(network, headers, sizeof(headers), initial_body,
+    if (read_response_headers(network, secure, headers, sizeof(headers), initial_body,
                               &initial_length, &header_length) != 0) {
         puts("wget: failed to read HTTP response headers");
-        close(network);
+        close_network(network, secure);
         return 1;
     }
 
@@ -432,14 +461,14 @@ int main(int argc, char **argv) {
     if (parse_response_headers(headers, header_length, &status, &has_content_length,
                                &content_length, &chunked) != 0 || status < 200 || status >= 300) {
         printf("wget: HTTP request failed with status %u\n", (unsigned)status);
-        close(network);
+        close_network(network, secure);
         return 1;
     }
 
     int output = open(output_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (output < 0) {
         puts("wget: cannot open output file");
-        close(network);
+        close_network(network, secure);
         return 1;
     }
 
@@ -453,7 +482,7 @@ int main(int argc, char **argv) {
         int consumed = consume_chunked(output, initial_body, initial_length, &decoder);
         uint8_t buffer[NETWORK_BUFFER_SIZE];
         while (consumed == 0) {
-            int amount = receive_data(network, buffer, sizeof(buffer), &last_activity);
+            int amount = receive_data(network, secure, buffer, sizeof(buffer), &last_activity);
             if (amount == -1) continue;
             if (amount <= 0) {
                 result = -1;
@@ -473,7 +502,7 @@ int main(int argc, char **argv) {
         remaining -= first;
         uint8_t buffer[NETWORK_BUFFER_SIZE];
         while (remaining && !result) {
-            int amount = receive_data(network, buffer, sizeof(buffer), &last_activity);
+            int amount = receive_data(network, secure, buffer, sizeof(buffer), &last_activity);
             if (amount == -1) continue;
             if (amount <= 0) {
                 result = -1;
@@ -492,7 +521,7 @@ int main(int argc, char **argv) {
         downloaded += initial_length;
         uint8_t buffer[NETWORK_BUFFER_SIZE];
         while (!result) {
-            int amount = receive_data(network, buffer, sizeof(buffer), &last_activity);
+            int amount = receive_data(network, secure, buffer, sizeof(buffer), &last_activity);
             if (amount == -1) continue;
             if (amount == 0) break;
             if (amount < 0 || write_all(output, buffer, (size_t)amount) != 0) {
@@ -504,7 +533,7 @@ int main(int argc, char **argv) {
     }
 
     close(output);
-    close(network);
+    close_network(network, secure);
     if (result != 0) {
         puts("wget: download was incomplete or the response was malformed");
         return 1;

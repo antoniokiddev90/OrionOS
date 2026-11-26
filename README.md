@@ -1,4 +1,4 @@
-# OrionOS v0.06
+# OrionOS v0.07
 
 OrionOS is a minimal operating system written in C and NASM.
 
@@ -24,6 +24,7 @@ OrionOS is a minimal operating system written in C and NASM.
 - E1000 driver
 - Net stack
 - Net shell utils (ping, wget etc.)
+- package manager
 
 ## Architecture
 
@@ -58,7 +59,12 @@ make run # It comes pre-installed
 ```bash
 make linux # generated toolchain in build/host/bin/
 ```
-
+## How to use package manager
+- pkg update # Update the system repositories
+- pkg install <name> # installs a package 
+- pkg remove <name> # removes a package
+- pkg upgrade # update the packages
+Note: To see all packages, go to https://orionos-repo.onrender.com/index.txt
 ## How to Run
 ```bash
 make run
