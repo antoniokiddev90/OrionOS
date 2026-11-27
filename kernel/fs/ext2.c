@@ -116,6 +116,7 @@ static int read_inode(uint32_t inode_number, struct ext2_file *file) {
     file->mode = read_u16(raw, 0);
     file->uid = read_u16(raw, 2);
     file->gid = read_u16(raw, 24);
+    file->allocated_blocks = read_u32(raw, 28);
     file->size = read_u32(raw, 4);
     if ((file->mode & EXT2_MODE_REGULAR) && inode_size >= 112) file->size |= (uint64_t)read_u32(raw, 108) << 32;
     for (size_t i = 0; i < 15; ++i) file->blocks[i] = read_u32(raw, 40 + i * 4);
@@ -131,12 +132,7 @@ static int write_inode(const struct ext2_file *file, uint16_t links, uint32_t si
     put_u16(raw, 2, (uint16_t)file->uid);
     put_u16(raw, 24, (uint16_t)file->gid);
     put_u16(raw, 26, links);
-    uint32_t allocated = 0;
-    for (size_t i = 0; i < 12; ++i) if (file->blocks[i]) ++allocated;
-    if (file->blocks[12]) ++allocated;
-    if (file->blocks[13]) ++allocated;
-    if (file->blocks[14]) ++allocated;
-    put_u32(raw, 28, allocated * (block_size / 512));
+    put_u32(raw, 28, file->allocated_blocks);
     for (size_t i = 0; i < 15; ++i) put_u32(raw, 40 + i * 4, file->blocks[i]);
     if ((file->mode & EXT2_MODE_REGULAR) && inode_size >= 112) put_u32(raw, 108, size_high);
     return write_bytes(inode_offset, raw, inode_size);
@@ -144,9 +140,20 @@ static int write_inode(const struct ext2_file *file, uint16_t links, uint32_t si
 static uint32_t file_data_block(const struct ext2_file *file, uint64_t index) {
     if (index < 12) return file->blocks[index];
     index -= 12;
-    if (index >= block_size / 4 || !file->blocks[12]) return index >= block_size / 4 ? UINT32_MAX : 0;
-    if (read_block(file->blocks[12], indirect_buffer) != 0) return UINT32_MAX;
-    return read_u32(indirect_buffer, (size_t)index * 4);
+    uint64_t pointers = block_size / 4;
+    if (index < pointers) {
+        if (!file->blocks[12]) return 0;
+        if (read_block(file->blocks[12], indirect_buffer) != 0) return UINT32_MAX;
+        return read_u32(indirect_buffer, (size_t)index * 4);
+    }
+    index -= pointers;
+    if (index >= pointers * pointers) return UINT32_MAX;
+    if (!file->blocks[13]) return 0;
+    if (read_block(file->blocks[13], indirect_buffer) != 0) return UINT32_MAX;
+    uint32_t second_level = read_u32(indirect_buffer, (size_t)(index / pointers) * 4);
+    if (!second_level) return 0;
+    if (read_block(second_level, indirect_buffer) != 0) return UINT32_MAX;
+    return read_u32(indirect_buffer, (size_t)(index % pointers) * 4);
 }
 int ext2_mount(void) {
     mounted = 0;
@@ -307,33 +314,77 @@ static uint32_t allocate_inode(int directory) {
     return 0;
 }
 static int allocate_file_block(struct ext2_file *file, uint64_t index, uint32_t *physical) {
+    uint32_t sectors_per_block = block_size / 512;
+    uint64_t pointers = block_size / 4;
     if (index < 12) {
-        if (!file->blocks[index]) file->blocks[index] = allocate_block();
+        if (!file->blocks[index]) {
+            file->blocks[index] = allocate_block();
+            if (!file->blocks[index]) return -1;
+            file->allocated_blocks += sectors_per_block;
+        }
         *physical = file->blocks[index];
-        return *physical ? 0 : -1;
+        return 0;
     }
     index -= 12;
-    if (index >= block_size / 4) return -1;
-    if (!file->blocks[12]) {
-        file->blocks[12] = allocate_block();
-        if (!file->blocks[12]) return -1;
-        for (size_t i = 0; i < block_size; ++i) indirect_buffer[i] = 0;
-        if (write_block(file->blocks[12], indirect_buffer) != 0) return -1;
+    if (index < pointers) {
+        if (!file->blocks[12]) {
+            file->blocks[12] = allocate_block();
+            if (!file->blocks[12]) return -1;
+            file->allocated_blocks += sectors_per_block;
+            for (size_t i = 0; i < block_size; ++i) indirect_buffer[i] = 0;
+            if (write_block(file->blocks[12], indirect_buffer) != 0) return -1;
+        }
+        if (read_block(file->blocks[12], indirect_buffer) != 0) return -1;
+        uint32_t data_block = read_u32(indirect_buffer, (size_t)index * 4);
+        if (!data_block) {
+            data_block = allocate_block();
+            if (!data_block) return -1;
+            put_u32(indirect_buffer, (size_t)index * 4, data_block);
+            if (write_block(file->blocks[12], indirect_buffer) != 0) return -1;
+            file->allocated_blocks += sectors_per_block;
+        }
+        *physical = data_block;
+        return 0;
     }
-    if (read_block(file->blocks[12], indirect_buffer) != 0) return -1;
-    uint32_t data_block = read_u32(indirect_buffer, (size_t)index * 4);
+    index -= pointers;
+    if (index >= pointers * pointers) return -1;
+    if (!file->blocks[13]) {
+        file->blocks[13] = allocate_block();
+        if (!file->blocks[13]) return -1;
+        file->allocated_blocks += sectors_per_block;
+        for (size_t i = 0; i < block_size; ++i) indirect_buffer[i] = 0;
+        if (write_block(file->blocks[13], indirect_buffer) != 0) return -1;
+    }
+    uint32_t first_level_index = (uint32_t)(index / pointers);
+    uint32_t second_level_index = (uint32_t)(index % pointers);
+    if (read_block(file->blocks[13], indirect_buffer) != 0) return -1;
+    uint32_t second_level = read_u32(indirect_buffer, (size_t)first_level_index * 4);
+    if (!second_level) {
+        second_level = allocate_block();
+        if (!second_level) return -1;
+        put_u32(indirect_buffer, (size_t)first_level_index * 4, second_level);
+        if (write_block(file->blocks[13], indirect_buffer) != 0) return -1;
+        file->allocated_blocks += sectors_per_block;
+        for (size_t i = 0; i < block_size; ++i) indirect_buffer[i] = 0;
+        if (write_block(second_level, indirect_buffer) != 0) return -1;
+    }
+    if (read_block(second_level, indirect_buffer) != 0) return -1;
+    uint32_t data_block = read_u32(indirect_buffer, (size_t)second_level_index * 4);
     if (!data_block) {
         data_block = allocate_block();
         if (!data_block) return -1;
-        put_u32(indirect_buffer, (size_t)index * 4, data_block);
-        if (write_block(file->blocks[12], indirect_buffer) != 0) return -1;
+        put_u32(indirect_buffer, (size_t)second_level_index * 4, data_block);
+        if (write_block(second_level, indirect_buffer) != 0) return -1;
+        file->allocated_blocks += sectors_per_block;
     }
     *physical = data_block;
     return 0;
 }
 int64_t ext2_write(struct ext2_file *file, uint64_t offset, const void *buffer, size_t size) {
     if (!mounted || !file || (!buffer && size) || (file->mode & EXT2_MODE_DIRECTORY) == EXT2_MODE_DIRECTORY) return -1;
-    if (offset > (uint64_t)(12 + block_size / 4) * block_size || size > (uint64_t)(12 + block_size / 4) * block_size - offset) return -1;
+    uint64_t pointers = block_size / 4;
+    uint64_t maximum_size = (12 + pointers + pointers * pointers) * block_size;
+    if (offset > maximum_size || size > maximum_size - offset) return -1;
     const uint8_t *in = (const uint8_t *)buffer;
     size_t remaining = size;
     while (remaining) {
@@ -461,12 +512,14 @@ static int create_node(const char *path, uint32_t mode, uint32_t uid, uint32_t g
     node.mode = mode;
     node.uid = uid;
     node.gid = gid;
+    node.allocated_blocks = 0;
     node.size = 0;
     for (size_t i = 0; i < 15; ++i) node.blocks[i] = 0;
     if ((mode & EXT2_MODE_DIRECTORY) == EXT2_MODE_DIRECTORY) {
         uint32_t data_block = allocate_block();
         if (!data_block) return -1;
         node.blocks[0] = data_block;
+        node.allocated_blocks = block_size / 512;
         node.size = block_size;
         for (size_t i = 0; i < block_size; ++i) block_buffer[i] = 0;
         put_u32(block_buffer, 0, inode_number);

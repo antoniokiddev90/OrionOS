@@ -1,7 +1,7 @@
 #include "pkg.h"
 
 #define TAR_BLOCK_SIZE 512
-#define TAR_FILE_MAX 270000
+#define TAR_FILE_MAX 300000
 
 static int read_exact(int descriptor, void *buffer, size_t length) {
     size_t used = 0;

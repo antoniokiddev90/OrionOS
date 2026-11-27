@@ -21,7 +21,7 @@
 #define PKG_URL_MAX 256
 #define PKG_REPO_MAX 16
 #define PKG_TEXT_MAX 16384
-#define PKG_ARCHIVE_LIMIT 270000
+#define PKG_ARCHIVE_LIMIT 600000
 #define PKG_REPO_LIST "/etc/pkg/repo.list"
 #define PKG_DB_DIR "/etc/pkg/db"
 #define PKG_CACHE_DIR "/var/cache/pkg"

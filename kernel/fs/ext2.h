@@ -8,6 +8,7 @@ struct ext2_file {
     uint64_t size;
     uint32_t uid;
     uint32_t gid;
+    uint32_t allocated_blocks;
     uint32_t blocks[15];
 };
 struct ext2_dirent {
