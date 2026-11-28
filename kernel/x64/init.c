@@ -4,6 +4,7 @@
 #include "pic.h"
 #include "pit.h"
 #include "atkbd.h"
+#include "ps2mouse.h"
 #include "pmm.h"
 #include "mb2.h"
 #include "syscall.h"
@@ -19,6 +20,7 @@ void x64_init(void) {
     pic_init();
     pit_init(100);
     atkbd_init();
+    ps2mouse_init();
     syscall_init();
 }
 
@@ -28,6 +30,13 @@ void x64_mm_init(uint32_t mb_magic, uint32_t mb_info, uint64_t kernel_end) {
 
     boot_magic = mb_magic;
     boot_info = mb_info;
+
+    struct mb2_framebuffer framebuffer;
+    if (mb2_find_framebuffer(mb_magic, mb_info, &framebuffer) == 1) {
+        uint64_t framebuffer_size = (uint64_t)framebuffer.pitch * framebuffer.height;
+        if (framebuffer_size && framebuffer_size <= UINT64_MAX - framebuffer.address)
+            pmm_exclude_range(framebuffer.address, framebuffer_size);
+    }
 
     int n = mb2_find_mmap(mb_magic, mb_info, regions, PMM_MAX_REGIONS);
     if (n <= 0) {

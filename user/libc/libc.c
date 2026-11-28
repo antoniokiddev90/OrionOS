@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <syscalls.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/ipc.h>
 #include <sys/network.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -122,8 +124,11 @@ in_addr_t inet_addr(const char *text) {
 }
 int stat(const char *path, struct stat *status) { return (int)orion_syscall2(ORION_SYS_STAT, (uint64_t)path, (uint64_t)status); }
 int fstat(int descriptor, struct stat *status) { return (int)orion_syscall2(ORION_SYS_FSTAT, (uint64_t)descriptor, (uint64_t)status); }
+int ioctl(int descriptor, unsigned long request, void *argument) { return (int)orion_syscall3(ORION_SYS_IOCTL, (uint64_t)descriptor, request, (uint64_t)argument); }
 int mkdir(const char *path, mode_t mode) { (void)mode; return (int)orion_syscall1(ORION_SYS_MKDIR, (uint64_t)path); }
 int unlink(const char *path) { return (int)orion_syscall1(ORION_SYS_UNLINK, (uint64_t)path); }
+long orion_ipc_send(uint64_t receiver_pid, const void *message, size_t size) { return orion_syscall3(ORION_SYS_IPC_SEND, receiver_pid, (uint64_t)message, size); }
+long orion_ipc_receive(uint64_t sender_pid, void *message, size_t capacity, uint64_t *sender_out) { return orion_syscall4(ORION_SYS_IPC_RECEIVE, sender_pid, (uint64_t)message, capacity, (uint64_t)sender_out); }
 void exit(int status) { (void)orion_syscall1(ORION_SYS_EXIT, (uint64_t)status); for (;;) __asm__ volatile("hlt"); }
 size_t strlen(const char *text) { size_t length = 0; while (text[length]) ++length; return length; }
 int strcmp(const char *left, const char *right) { while (*left && *left == *right) { ++left; ++right; } return (unsigned char)*left - (unsigned char)*right; }

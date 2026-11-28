@@ -12,6 +12,7 @@ struct pmm_region {
     uint64_t length;
 };
 
+void     pmm_exclude_range(uint64_t base, uint64_t length);
 void     pmm_init(struct pmm_region *regions, int count, uint64_t kernel_end);
 uint64_t pmm_alloc_frame(void);
 uint64_t pmm_alloc_frame_below(uint64_t limit);

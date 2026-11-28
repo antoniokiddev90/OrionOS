@@ -12,6 +12,7 @@
 #define VFS_S_IFMT 0170000
 #define VFS_S_IFREG 0100000
 #define VFS_S_IFDIR 0040000
+#define VFS_S_IFCHR 0020000
 struct vfs_stat {
     uint64_t inode;
     uint64_t size;
@@ -35,6 +36,7 @@ int vfs_mkdir(const char *path);
 int vfs_unlink(const char *path);
 int vfs_is_directory(const char *path);
 int vfs_is_tty(int descriptor);
+int64_t vfs_ioctl(int descriptor, unsigned long request, void *argument);
 int vfs_can_enter(const char *path);
 int vfs_chown(const char *path, uint32_t uid, uint32_t gid);
 #endif

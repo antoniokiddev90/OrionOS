@@ -41,7 +41,10 @@ enum {
     ORION_SYS_RECVFROM = 37,
     ORION_SYS_SHUTDOWN = 38,
     ORION_SYS_GET_NET_CONFIG = 39,
-    ORION_SYS_DHCP_RENEW = 40
+    ORION_SYS_DHCP_RENEW = 40,
+    ORION_SYS_IOCTL = 41,
+    ORION_SYS_IPC_SEND = 42,
+    ORION_SYS_IPC_RECEIVE = 43
 };
 long orion_syscall0(uint64_t number);
 long orion_syscall1(uint64_t number, uint64_t first);

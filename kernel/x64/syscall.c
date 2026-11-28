@@ -10,6 +10,8 @@
 #include "../mm/user_mmap.h"
 #include "../x64/pit.h"
 #include "../net/net.h"
+#include "../ipc/ipc.h"
+#include "framebuffer.h"
 #include <stdint.h>
 #include <stddef.h>
 #define SYS_WRITE 1
@@ -52,6 +54,9 @@
 #define SYS_SHUTDOWN 38
 #define SYS_GET_NET_CONFIG 39
 #define SYS_DHCP_RENEW 40
+#define SYS_IOCTL 41
+#define SYS_IPC_SEND 42
+#define SYS_IPC_RECEIVE 43
 #define USER_ARG_MAX 16
 #define USER_STRING_MAX 255
 #define USER_IO_MAX 65536
@@ -405,6 +410,25 @@ static uint64_t sys_get_net_config(uint64_t address) {
     *(struct net_config *)address = config;
     return 0;
 }
+
+static uint64_t sys_ioctl(int descriptor, unsigned long request, uint64_t argument) {
+    if (request == ORION_FB_IOCTL_GET_INFO && !user_range_writable(argument, sizeof(struct orion_fb_info))) return (uint64_t)-1;
+    return (uint64_t)vfs_ioctl(descriptor, request, (void *)argument);
+}
+
+static uint64_t sys_ipc_send(uint64_t receiver, uint64_t address, size_t size) {
+    struct task *task = task_current();
+    if (!task || size > IPC_MAX_MESSAGE || (size && !user_range_readable(address, size))) return (uint64_t)-1;
+    return (uint64_t)ipc_send(task->pid, receiver, (const void *)address, size);
+}
+
+static uint64_t sys_ipc_receive(uint64_t sender_filter, uint64_t address, size_t capacity, uint64_t sender_address) {
+    struct task *task = task_current();
+    if (!task || !capacity || capacity > IPC_MAX_MESSAGE || !user_range_writable(address, capacity)) return (uint64_t)-1;
+    if (sender_address && !user_range_writable(sender_address, sizeof(uint64_t))) return (uint64_t)-1;
+    return (uint64_t)ipc_receive(task->pid, sender_filter, (void *)address, capacity, sender_address ? (uint64_t *)sender_address : NULL);
+}
+
 uint64_t syscall_dispatch(uint64_t number, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t *frame) {
     switch (number) {
         case SYS_WRITE: return sys_write((int)a1, a2, (size_t)a3);
@@ -498,6 +522,9 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a1, uint64_t a2, uint64_t a3
         case SYS_SHUTDOWN: return sys_shutdown(a1, a2);
         case SYS_GET_NET_CONFIG: return sys_get_net_config(a1);
         case SYS_DHCP_RENEW: return (uint64_t)net_dhcp_renew();
+        case SYS_IOCTL: return sys_ioctl((int)a1, (unsigned long)a2, a3);
+        case SYS_IPC_SEND: return sys_ipc_send(a1, a2, (size_t)a3);
+        case SYS_IPC_RECEIVE: return sys_ipc_receive(a1, a2, (size_t)a3, a4);
         default: (void)a4; (void)a5; return (uint64_t)-1;
     }
 }

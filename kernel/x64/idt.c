@@ -2,6 +2,7 @@
 #include "pic.h"
 #include "pit.h"
 #include "atkbd.h"
+#include "ps2mouse.h"
 #include "tss.h"
 #include "log/kprintf.h"
 
@@ -159,5 +160,6 @@ void exception_dispatch(struct exc_frame *f) {
 void irq_dispatch(uint64_t irq) {
     if (irq == 0) pit_irq();
     if (irq == 1) atkbd_irq();
+    if (irq == 12) ps2mouse_irq();
     pic_eoi((uint8_t)irq);
 }

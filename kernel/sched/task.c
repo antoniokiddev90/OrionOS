@@ -6,6 +6,7 @@
 #include "log/kprintf.h"
 #include "../mm/user_mmap.h"
 #include "net/net.h"
+#include "../ipc/ipc.h"
 
 static struct task *pick_next(struct task *start);
 static struct task *current;
@@ -25,6 +26,7 @@ void task_init(void) {
     idle_task->cwd[1] = 0;
     idle_task->next = idle_task;
     current = idle_task;
+    ipc_init();
 }
 struct task *task_create(uint64_t entry, uint64_t user_stack, uint64_t arg0, uint64_t arg1, uint64_t *pml4) {
     if (!pml4) return NULL;
@@ -103,6 +105,7 @@ int task_replace_address_space(uint64_t *pml4) {
 void task_exit(uint32_t status) {
     if (!current || current == idle_task) return;
     net_close_owner(current->pid);
+    ipc_process_exit(current->pid);
     current->exit_status = status;
     current->state = TASK_DEAD;
     for (struct task *task = idle_task->next; task != idle_task; task = task->next) {

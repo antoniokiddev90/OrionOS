@@ -20,8 +20,10 @@ CFILES=kernel/main.c \
        kernel/x64/idt.c \
 	       kernel/x64/pic.c \
 	       kernel/x64/pit.c \
-	       kernel/x64/atkbd.c \
-	       kernel/x64/e1000.c \
+       kernel/x64/atkbd.c \
+       kernel/x64/ps2mouse.c \
+       kernel/x64/framebuffer.c \
+       kernel/x64/e1000.c \
 	       kernel/net/net.c \
 	       kernel/x64/uart.c \
        kernel/x64/vga.c \
@@ -34,6 +36,7 @@ CFILES=kernel/main.c \
        kernel/mm/vmm.c \
        kernel/mm/heap.c \
        kernel/sched/task.c \
+       kernel/ipc/ipc.c \
        kernel/block/ata.c \
        kernel/block/gpt.c \
        kernel/fs/ext2.c \
@@ -67,7 +70,7 @@ endif
 >$(NASM) $(ASFLAGS) $< -o $@
 build/user:
 >mkdir -p build/user
-build/user/libc.o: user/libc/libc.c user/libc/include/stddef.h user/libc/include/stdint.h user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/string.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/sys/stat.h user/libc/include/syscalls.h user/libc/include/sys/network.h | build/user
+build/user/libc.o: user/libc/libc.c user/libc/include/stddef.h user/libc/include/stdint.h user/libc/include/stdio.h user/libc/include/stdlib.h user/libc/include/string.h user/libc/include/unistd.h user/libc/include/fcntl.h user/libc/include/sys/stat.h user/libc/include/syscalls.h user/libc/include/sys/network.h user/libc/include/sys/ioctl.h user/libc/include/sys/ipc.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@
 build/user/start.o: user/libc/start.c user/libc/include/stdint.h user/libc/include/stdlib.h | build/user
 >$(CC) $(USER_CFLAGS) -c $< -o $@

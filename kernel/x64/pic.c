@@ -10,4 +10,13 @@ void pic_init(void) {
     outb(0x21, 0x01); wait_io(); outb(0xA1, 0x01); wait_io();
     outb(0x21, (uint8_t)(master & 0xFC)); outb(0xA1, (uint8_t)(slave & 0xFF));
 }
+void pic_enable_irq(uint8_t irq) {
+    if (irq >= 16) return;
+    if (irq < 8) {
+        outb(0x21, (uint8_t)(inb(0x21) & (uint8_t)~(1u << irq)));
+        return;
+    }
+    outb(0xA1, (uint8_t)(inb(0xA1) & (uint8_t)~(1u << (irq - 8))));
+    outb(0x21, (uint8_t)(inb(0x21) & (uint8_t)~(1u << 2)));
+}
 void pic_eoi(uint8_t irq) { if (irq >= 8) outb(0xA0, 0x20); outb(0x20, 0x20); }

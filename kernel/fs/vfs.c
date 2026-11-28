@@ -1,6 +1,9 @@
 #include "vfs.h"
 #include "ext2.h"
 #include "../sched/task.h"
+#include "../x64/atkbd.h"
+#include "../x64/framebuffer.h"
+#include "../x64/ps2mouse.h"
 #include <stddef.h>
 #define VFS_MAX_OPEN 64
 #define VFS_MAX_TMP 24
@@ -16,6 +19,10 @@
 #define VFS_KIND_DEV_DIRECTORY 9
 #define VFS_KIND_PROC_DIRECTORY 10
 #define VFS_KIND_PROC_SELF_DIRECTORY 11
+#define VFS_KIND_INPUT_DIRECTORY 12
+#define VFS_KIND_FRAMEBUFFER 13
+#define VFS_KIND_KEYBOARD 14
+#define VFS_KIND_MOUSE 15
 #define EXT2_MODE_DIRECTORY 0x4000
 #define EXT2_MODE_REGULAR 0x8000
 struct vfs_descriptor {
@@ -117,6 +124,7 @@ static int set_proc_data(struct vfs_descriptor *descriptor, const char *text) {
 }
 static int virtual_directory_kind(const char *path) {
     if (string_equal(path, "/dev") || string_equal(path, "/dev/")) return VFS_KIND_DEV_DIRECTORY;
+    if (string_equal(path, "/dev/input") || string_equal(path, "/dev/input/")) return VFS_KIND_INPUT_DIRECTORY;
     if (string_equal(path, "/proc") || string_equal(path, "/proc/")) return VFS_KIND_PROC_DIRECTORY;
     if (string_equal(path, "/proc/self") || string_equal(path, "/proc/self/")) return VFS_KIND_PROC_SELF_DIRECTORY;
     if (string_equal(path, "/tmp") || string_equal(path, "/tmp/")) return VFS_KIND_TMP_DIRECTORY;
@@ -139,6 +147,11 @@ static uint32_t current_gid(void) {
     return task ? task->gid : 0;
 }
 
+static uint64_t framebuffer_size_bytes(void) {
+    struct orion_fb_info info;
+    return framebuffer_get_info(&info) == 0 ? info.size : 0;
+}
+
 static int mode_allows(uint32_t mode, uint32_t owner_uid, uint32_t owner_gid, uint32_t want) {
     uint32_t uid = current_uid();
     if (uid == 0) return 1;
@@ -147,6 +160,18 @@ static int mode_allows(uint32_t mode, uint32_t owner_uid, uint32_t owner_gid, ui
     else if (current_gid() == owner_gid) bits = (mode >> 3) & 7;
     else bits = mode & 7;
     return (bits & want) == want;
+}
+
+static int device_open_allows(uint32_t mode, uint32_t owner_gid, int flags) {
+    uint32_t want = 0;
+    int access = flags & 3;
+    if (access != VFS_O_WRONLY) want |= VFS_PERM_READ;
+    if (access != VFS_O_RDONLY) want |= VFS_PERM_WRITE;
+    return mode_allows(mode, 0, owner_gid, want);
+}
+
+static int framebuffer_access_allowed(void) {
+    return current_uid() == 0 || current_gid() == ORION_VIDEO_GID;
 }
 
 static int open_allows(const struct ext2_file *file, int flags) {
@@ -206,6 +231,25 @@ int vfs_open_flags(const char *path, int flags, uint32_t mode) {
     if (string_equal(path, "/dev/null")) item->kind = VFS_KIND_NULL;
     else if (string_equal(path, "/dev/zero")) item->kind = VFS_KIND_ZERO;
     else if (string_equal(path, "/dev/tty")) item->kind = VFS_KIND_TTY;
+    else if (string_equal(path, "/dev/fb0")) {
+        if (!framebuffer_available() || !device_open_allows(0660, ORION_VIDEO_GID, flags)) {
+            item->used = 0;
+            return -1;
+        }
+        item->kind = VFS_KIND_FRAMEBUFFER;
+    } else if (string_equal(path, "/dev/input/keyboard0")) {
+        if (!device_open_allows(0444, 0, flags)) {
+            item->used = 0;
+            return -1;
+        }
+        item->kind = VFS_KIND_KEYBOARD;
+    } else if (string_equal(path, "/dev/input/mouse0")) {
+        if (!ps2mouse_available() || !device_open_allows(0444, 0, flags)) {
+            item->used = 0;
+            return -1;
+        }
+        item->kind = VFS_KIND_MOUSE;
+    }
     else if (string_equal(path, "/proc/uptime")) {
         set_proc_data(item, "0.00 0.00\n");
     } else if (string_equal(path, "/proc/version")) {
@@ -304,6 +348,28 @@ int64_t vfs_read(int descriptor, void *buffer, size_t size) {
         return (int64_t)size;
     }
     if (item->kind == VFS_KIND_NULL) return 0;
+    if (item->kind == VFS_KIND_FRAMEBUFFER) {
+        if (!framebuffer_access_allowed()) return -1;
+        int64_t result = framebuffer_read(item->offset, buffer, size);
+        if (result > 0) item->offset += (uint64_t)result;
+        return result;
+    }
+    if (item->kind == VFS_KIND_KEYBOARD || item->kind == VFS_KIND_MOUSE) {
+        if (size < sizeof(struct orion_input_event)) return -1;
+        size_t count = 0;
+        while (size - count >= sizeof(struct orion_input_event)) {
+            struct orion_input_event event;
+            int available = item->kind == VFS_KIND_KEYBOARD ? atkbd_read_event(&event) : ps2mouse_read_event(&event);
+            if (!available) {
+                if (count) break;
+                __asm__ volatile("sti; hlt; cli" : : : "memory");
+                continue;
+            }
+            ((struct orion_input_event *)((uint8_t *)buffer + count))[0] = event;
+            count += sizeof(event);
+        }
+        return (int64_t)count;
+    }
     return -1;
 }
 int64_t vfs_write(int descriptor, const void *buffer, size_t size) {
@@ -323,6 +389,12 @@ int64_t vfs_write(int descriptor, const void *buffer, size_t size) {
         if (item->offset > file->size) file->size = (size_t)item->offset;
         return (int64_t)size;
     }
+    if (item->kind == VFS_KIND_FRAMEBUFFER) {
+        if (!framebuffer_access_allowed()) return -1;
+        int64_t result = framebuffer_write(item->offset, buffer, size);
+        if (result > 0) item->offset += (uint64_t)result;
+        return result;
+    }
     if (item->kind == VFS_KIND_NULL || item->kind == VFS_KIND_TTY || item->kind == VFS_KIND_ZERO) return (int64_t)size;
     return -1;
 }
@@ -339,12 +411,13 @@ static int64_t add_dirent(uint8_t *buffer, size_t capacity, size_t used, uint64_
     for (size_t i = 0; i <= name_length; ++i) entry->name[i] = name[i];
     return (int64_t)record_length;
 }
-static const char *const dev_entries[] = {"null", "zero", "tty"};
+static const char *const dev_entries[] = {"fb0", "input", "null", "zero", "tty"};
+static const char *const input_entries[] = {"keyboard0", "mouse0"};
 static const char *const proc_entries[] = {"self", "uptime", "version"};
 int64_t vfs_getdents(int descriptor, void *buffer, size_t size) {
     if (descriptor < 0 || descriptor >= VFS_MAX_OPEN || !descriptors[descriptor].used || !buffer) return -1;
     struct vfs_descriptor *item = &descriptors[descriptor];
-    if (item->kind != VFS_KIND_DIRECTORY && item->kind != VFS_KIND_TMP_DIRECTORY && item->kind != VFS_KIND_DEV_DIRECTORY && item->kind != VFS_KIND_PROC_DIRECTORY && item->kind != VFS_KIND_PROC_SELF_DIRECTORY) return -1;
+    if (item->kind != VFS_KIND_DIRECTORY && item->kind != VFS_KIND_TMP_DIRECTORY && item->kind != VFS_KIND_DEV_DIRECTORY && item->kind != VFS_KIND_PROC_DIRECTORY && item->kind != VFS_KIND_PROC_SELF_DIRECTORY && item->kind != VFS_KIND_INPUT_DIRECTORY) return -1;
     size_t used = 0;
     if (item->kind == VFS_KIND_DIRECTORY) {
         while (used < size) {
@@ -365,12 +438,16 @@ int64_t vfs_getdents(int descriptor, void *buffer, size_t size) {
         const char *name = NULL;
         uint64_t inode = 1;
         uint8_t type = 4;
-        if (item->kind == VFS_KIND_DEV_DIRECTORY || item->kind == VFS_KIND_PROC_DIRECTORY || item->kind == VFS_KIND_PROC_SELF_DIRECTORY) {
-            const char *const *entries = item->kind == VFS_KIND_DEV_DIRECTORY ? dev_entries : item->kind == VFS_KIND_PROC_SELF_DIRECTORY ? (const char *const[]){"status"} : proc_entries;
-            size_t count = item->kind == VFS_KIND_DEV_DIRECTORY ? sizeof(dev_entries) / sizeof(dev_entries[0]) : item->kind == VFS_KIND_PROC_SELF_DIRECTORY ? 1 : sizeof(proc_entries) / sizeof(proc_entries[0]);
+        if (item->kind == VFS_KIND_DEV_DIRECTORY || item->kind == VFS_KIND_PROC_DIRECTORY || item->kind == VFS_KIND_PROC_SELF_DIRECTORY || item->kind == VFS_KIND_INPUT_DIRECTORY) {
+            const char *const *entries = item->kind == VFS_KIND_DEV_DIRECTORY ? dev_entries : item->kind == VFS_KIND_INPUT_DIRECTORY ? input_entries : item->kind == VFS_KIND_PROC_SELF_DIRECTORY ? (const char *const[]){"status"} : proc_entries;
+            size_t count = item->kind == VFS_KIND_DEV_DIRECTORY ? sizeof(dev_entries) / sizeof(dev_entries[0]) : item->kind == VFS_KIND_INPUT_DIRECTORY ? sizeof(input_entries) / sizeof(input_entries[0]) : item->kind == VFS_KIND_PROC_SELF_DIRECTORY ? 1 : sizeof(proc_entries) / sizeof(proc_entries[0]);
             if (item->offset >= count) break;
             name = entries[item->offset++];
-            type = item->kind == VFS_KIND_PROC_DIRECTORY && string_equal(name, "self") ? 4 : 8;
+            if (item->kind == VFS_KIND_DEV_DIRECTORY && string_equal(name, "fb0") && !framebuffer_available()) continue;
+            if (item->kind == VFS_KIND_INPUT_DIRECTORY && string_equal(name, "mouse0") && !ps2mouse_available()) continue;
+            type = item->kind == VFS_KIND_DEV_DIRECTORY && string_equal(name, "input") ? 4 :
+                   item->kind == VFS_KIND_PROC_DIRECTORY && string_equal(name, "self") ? 4 :
+                   item->kind == VFS_KIND_DEV_DIRECTORY || item->kind == VFS_KIND_INPUT_DIRECTORY ? 2 : 8;
         } else {
             size_t seen = 0;
             for (size_t i = 0; i < VFS_MAX_TMP; ++i) {
@@ -420,7 +497,9 @@ int vfs_dup(int descriptor) {
 int vfs_size(int descriptor, uint64_t *size) {
     if (descriptor < 0 || descriptor >= VFS_MAX_OPEN || !descriptors[descriptor].used || !size) return -1;
     struct vfs_descriptor *item = &descriptors[descriptor];
+    if (item->kind == VFS_KIND_FRAMEBUFFER && !framebuffer_access_allowed()) return -1;
     if (item->kind == VFS_KIND_EXT2 || item->kind == VFS_KIND_DIRECTORY) *size = item->file.size;
+    else if (item->kind == VFS_KIND_FRAMEBUFFER) *size = framebuffer_size_bytes();
     else if (item->kind == VFS_KIND_TMP) *size = tmp_files[item->tmp_index].size;
     else *size = item->data_size;
     return 0;
@@ -428,6 +507,7 @@ int vfs_size(int descriptor, uint64_t *size) {
 int64_t vfs_seek(int descriptor, int64_t offset, int whence) {
     if (descriptor < 0 || descriptor >= VFS_MAX_OPEN || !descriptors[descriptor].used) return -1;
     struct vfs_descriptor *item = &descriptors[descriptor];
+    if (item->kind == VFS_KIND_FRAMEBUFFER && !framebuffer_access_allowed()) return -1;
     int64_t base = 0;
     if (whence == 1) base = (int64_t)item->offset;
     else if (whence == 2) {
@@ -461,6 +541,21 @@ int vfs_stat_path(const char *path, struct vfs_stat *status) {
         status->mode = VFS_S_IFDIR | 0755;
         return 0;
     }
+    if (string_equal(path, "/dev/fb0")) {
+        if (!framebuffer_available()) return -1;
+        status->inode = 3;
+        status->size = framebuffer_size_bytes();
+        status->mode = VFS_S_IFCHR | 0660;
+        status->gid = ORION_VIDEO_GID;
+        return 0;
+    }
+    if (string_equal(path, "/dev/input/mouse0") && !ps2mouse_available()) return -1;
+    if (string_equal(path, "/dev/input/keyboard0") || string_equal(path, "/dev/input/mouse0")) {
+        status->inode = string_equal(path, "/dev/input/keyboard0") ? 4 : 5;
+        status->size = 0;
+        status->mode = VFS_S_IFCHR | 0444;
+        return 0;
+    }
     if (string_equal(path, "/dev/null") || string_equal(path, "/dev/zero") || string_equal(path, "/dev/tty") || string_equal(path, "/proc/uptime") || string_equal(path, "/proc/version") || string_equal(path, "/proc/self/status")) {
         status->inode = 2;
         status->size = 0;
@@ -484,6 +579,25 @@ int vfs_stat_fd(int descriptor, struct vfs_stat *status) {
     status->uid = 0;
     status->gid = 0;
     if (item->kind == VFS_KIND_EXT2 || item->kind == VFS_KIND_DIRECTORY) return fill_stat(&item->file, status);
+    if (item->kind == VFS_KIND_FRAMEBUFFER) {
+        status->inode = 3;
+        status->size = framebuffer_size_bytes();
+        status->mode = VFS_S_IFCHR | 0660;
+        status->gid = ORION_VIDEO_GID;
+        return 0;
+    }
+    if (item->kind == VFS_KIND_KEYBOARD || item->kind == VFS_KIND_MOUSE) {
+        status->inode = item->kind == VFS_KIND_KEYBOARD ? 4 : 5;
+        status->size = 0;
+        status->mode = VFS_S_IFCHR | 0444;
+        return 0;
+    }
+    if (item->kind == VFS_KIND_DEV_DIRECTORY || item->kind == VFS_KIND_PROC_DIRECTORY || item->kind == VFS_KIND_PROC_SELF_DIRECTORY || item->kind == VFS_KIND_TMP_DIRECTORY || item->kind == VFS_KIND_INPUT_DIRECTORY) {
+        status->inode = 1;
+        status->size = 0;
+        status->mode = VFS_S_IFDIR | 0755;
+        return 0;
+    }
     if (item->kind == VFS_KIND_TMP) {
         status->inode = 0x10000 + (uint64_t)item->tmp_index;
         status->size = tmp_files[item->tmp_index].size;
@@ -517,4 +631,11 @@ int vfs_is_directory(const char *path) {
 }
 int vfs_is_tty(int descriptor) {
     return descriptor >= 0 && descriptor < VFS_MAX_OPEN && descriptors[descriptor].used && descriptors[descriptor].kind == VFS_KIND_TTY;
+}
+
+int64_t vfs_ioctl(int descriptor, unsigned long request, void *argument) {
+    if (descriptor < 0 || descriptor >= VFS_MAX_OPEN || !descriptors[descriptor].used) return -1;
+    struct vfs_descriptor *item = &descriptors[descriptor];
+    if (item->kind != VFS_KIND_FRAMEBUFFER || !framebuffer_access_allowed()) return -1;
+    return framebuffer_ioctl(request, argument);
 }
